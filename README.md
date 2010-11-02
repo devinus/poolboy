@@ -78,7 +78,7 @@ Poolboy - A hunky Erlang worker pool factory
         worker_pool:checkin(PoolName, Worker),
         Reply.
 
-### example__worker.erl
+### example_worker.erl
 
     -module(example_worker).
     -behaviour(gen_server).
