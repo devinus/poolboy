@@ -25,7 +25,8 @@ init(Args) ->
     init(Args, #state{}).
 
 init([{worker_module, Mod} | Rest], State) ->
-    {ok, Sup} = poolboy_sup:start_link(Mod, Rest),
+    Args = [{pool, self()} | Rest],
+    {ok, Sup} = poolboy_sup:start_link(Mod, Args),
     init(Rest, State#state{worker_sup=Sup});
 init([{size, PoolSize} | Rest], State) ->
     init(Rest, State#state{size=PoolSize});
@@ -38,17 +39,19 @@ init([], #state{size=Size, worker_sup=Sup}=State) ->
     {ok, ready, State#state{workers=Workers}}.
 
 ready({checkin, Pid}, #state{workers=Workers}=State) ->
+    gen_server:cast(Pid, demonitor),
     {next_state, ready, State#state{workers=queue:in(Pid, Workers)}};
 ready(_Event, State) ->
     {next_state, ready, State}.
 
-ready(checkout, _From, #state{workers=Workers, worker_sup=Sup}=State) ->
+ready(checkout, {Pid, _}, #state{workers=Workers, worker_sup=Sup}=State) ->
     case queue:out(Workers) of
         {{value, Reply}, Remaining} ->
+            gen_server:cast(Reply, {monitor, Pid}),
             {reply, Reply, ready, State#state{workers=Remaining}};
         {empty, Empty} ->
-            Pid = new_worker(Sup),
-            {reply, Pid, overflow, State#state{workers=Empty, overflow=1}}
+            Reply = new_worker(Sup, Pid),
+            {reply, Reply, overflow, State#state{workers=Empty, overflow=1}}
     end;
 ready(_Event, _From, State) ->
     {reply, ok, ready, State}.
@@ -66,14 +69,15 @@ overflow(checkout, From, #state{overflow=Overflow,
          max_overflow=MaxOverflow}=State) when Overflow >= MaxOverflow ->
     Waiting = State#state.waiting,
     {next_state, full, State#state{waiting=queue:in(From, Waiting)}};
-overflow(checkout, _From, #state{overflow=Overflow, worker_sup=Sup}=State) ->
-    {reply, new_worker(Sup), overflow, State#state{overflow=Overflow+1}};
+overflow(checkout, {Pid, _}, #state{overflow=Overflow, worker_sup=Sup}=State) ->
+    {reply, new_worker(Sup, Pid), overflow, State#state{overflow=Overflow+1}};
 overflow(_Event, _From, State) ->
     {reply, ok, overflow, State}.
 
 full({checkin, Pid}, #state{waiting=Waiting}=State) ->
     case queue:out(Waiting) of
         {{value, FromPid}, Remaining} ->
+            gen_server:cast(Pid, {monitor, FromPid}),
             gen_fsm:reply(FromPid, Pid),
             {next_state, full, State#state{waiting=Remaining}};
         {empty, Empty} ->
@@ -111,6 +115,11 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 new_worker(Sup) ->
     {ok, Pid} = supervisor:start_child(Sup, []),
     link(Pid),
+    Pid.
+
+new_worker(Sup, Owner) ->
+    Pid = new_worker(Sup),
+    gen_server:cast(Pid, {monitor, Owner}),
     Pid.
 
 dismiss_worker(Pid) -> gen_server:cast(Pid, stop).

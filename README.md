@@ -86,13 +86,14 @@ Poolboy - A hunky Erlang worker pool factory
     -export([start_link/1, stop/0, init/1, handle_call/3, handle_cast/2,
              handle_info/2, terminate/2, code_change/3]).
 
-    -record(state, {conn}).
+    -record(state, {pool, conn, monitor}).
 
     start_link(Args) -> gen_server:start_link(?MODULE, Args, []).
     stop() -> gen_server:cast(?MODULE, stop).
 
     init(Args) ->
         process_flag(trap_exit, true),
+        Pool = proplists:get_value(pool, Args),
         Hostname = proplists:get_value(hostname, Args),
         Database = proplists:get_value(database, Args),
         Username = proplists:get_value(username, Args),
@@ -100,7 +101,7 @@ Poolboy - A hunky Erlang worker pool factory
         {ok, Conn} = pgsql:connect(Hostname, Username, Password, [
             {database, Database}
         ]),
-        {ok, #state{conn=Conn}}.
+        {ok, #state{pool=Pool, conn=Conn}}.
 
     handle_call({squery, Sql}, _From, #state{conn=Conn}=State) ->
         {reply, pgsql:squery(Conn, Sql), State};
@@ -109,11 +110,22 @@ Poolboy - A hunky Erlang worker pool factory
     handle_call(_Request, _From, State) ->
         {reply, ok, State}.
 
+    handle_cast({monitor, Pid}, State) ->
+        MonitorRef = monitor(process, Pid),
+        {noreply, State#state{monitor=MonitorRef}};
+    handle_cast(demonitor, #state{monitor=null}=State) ->
+        {noreply, State};
+    handle_cast(demonitor, #state{monitor=MonitorRef}=State) ->
+        demonitor(MonitorRef),
+        {noreply, State#state{monitor=null}};
     handle_cast(stop, State) ->
         {stop, shutdown, State};
     handle_cast(_Msg, State) ->
         {noreply, State}.
 
+    handle_info({'DOWN', _, _, _, _}, #state{pool=Pool}=State) ->
+        gen_fsm:send_event(Pool, {checkin, self()}),
+        {noreply, State};
     handle_info({'EXIT', _, _}, State) ->
         {stop, shutdown, State};
     handle_info(_Info, State) ->
