@@ -3,9 +3,9 @@ Poolboy - A hunky Erlang worker pool factory
 
 ## Usage
 
-    Worker = worker_pool:checkout(PoolName),
+    Worker = poolboy:checkout(PoolName),
     Reply = gen_server:call(Worker, WorkerFun),
-    worker_pool:checkin(PoolName, Worker).
+    poolboy:checkin(PoolName, Worker).
 
 ## Example Application
 
@@ -61,21 +61,21 @@ Poolboy - A hunky Erlang worker pool factory
             Args = [{name, {local, PoolName}}, 
                     {worker_module, example_worker}]
                     ++ PoolConfig,
-            {PoolName, {worker_pool, start_link, [Args]},
-                        permanent, 5000, worker, [worker_pool]}
+            {PoolName, {poolboy, start_link, [Args]},
+                        permanent, 5000, worker, [poolboy]}
         end, Pools),
         {ok, {{one_for_all, 10, 10}, PoolSpecs}}.
 
     squery(PoolName, Sql) ->
-        Worker = worker_pool:checkout(PoolName),
+        Worker = poolboy:checkout(PoolName),
         Reply = gen_server:call(Worker, {squery, Sql}),
-        worker_pool:checkin(PoolName, Worker),
+        poolboy:checkin(PoolName, Worker),
         Reply.
 
     equery(PoolName, Stmt, Params) ->
-        Worker = worker_pool:checkout(PoolName),
+        Worker = poolboy:checkout(PoolName),
         Reply = gen_server:call(Worker, {equery, Stmt, Params}),
-        worker_pool:checkin(PoolName, Worker),
+        poolboy:checkin(PoolName, Worker),
         Reply.
 
 ### example_worker.erl
