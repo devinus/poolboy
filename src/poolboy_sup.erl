@@ -1,4 +1,4 @@
-% Copyright (c) 2010, Devin Torres <devin@devintorres.com>
+% Poolboy by Devin Torres <devin@devintorres.com>
 
 -module(poolboy_sup).
 -behaviour(supervisor).
