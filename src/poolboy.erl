@@ -166,7 +166,9 @@ new_worker(Sup, From) ->
     Ref = erlang:monitor(process, From),
     {Pid, Ref}.
 
-dismiss_worker(Pid) -> gen_server:cast(Pid, stop).
+dismiss_worker(Pid) ->
+    unlink(Pid),
+    Pid ! stop.
 
 prepopulate(0, _Sup) ->
     queue:new();
