@@ -1,3 +1,5 @@
+.PHONY: all compile clean
+
 all: compile
 
 compile:
