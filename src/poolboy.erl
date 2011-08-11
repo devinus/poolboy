@@ -95,7 +95,7 @@ overflow(checkout, {From, _}, #state{worker_sup=Sup,
 overflow(_Event, _From, State) ->
     {reply, ok, overflow, State}.
 
-full({checkin, Pid}, #state{waiting=Waiting}=State) ->
+full({checkin, Pid}, #state{waiting=Waiting, max_overflow=MaxOverflow}=State) ->
     case queue:out(Waiting) of
         {{value, {FromPid, _} = From}, Left} ->
             Ref = erlang:monitor(process, FromPid),
@@ -103,6 +103,14 @@ full({checkin, Pid}, #state{waiting=Waiting}=State) ->
             gen_fsm:reply(From, Pid),
             {next_state, full, State#state{waiting=Left,
                                            monitors=Monitors}};
+        {empty, Empty} when MaxOverflow < 1 ->
+            Workers = queue:in(Pid, State#state.workers),
+            Monitors = case lists:keytake(Pid, 1, State#state.monitors) of
+                {value, {_, Ref}, Left} -> erlang:demonitor(Ref), Left;
+                false -> []
+            end,
+            {next_state, ready, State#state{waiting=Empty, workers=Workers,
+                    monitors=Monitors}};
         {empty, Empty} ->
             dismiss_worker(Pid),
             {next_state, overflow, State#state{waiting=Empty}}
