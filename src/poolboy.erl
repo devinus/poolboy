@@ -70,7 +70,7 @@ ready(checkout, {FromPid, _} = From, #state{workers=Workers, worker_sup=Sup,
                                                overflow=1}};
         {empty, Empty}  when Blocks == false ->
             %% don't block the calling process
-            {reply, full, full, State};
+            {reply, full, full, State#state{workers=Empty}};
         {empty, Empty} ->
             Waiting = State#state.waiting,
             {next_state, full, State#state{workers=Empty,
@@ -124,7 +124,7 @@ full({checkin, Pid}, #state{waiting=Waiting, max_overflow=MaxOverflow}=State) ->
 full(_Event, State) ->
     {next_state, full, State}.
 
-full(checkout, From, #state{checkout_blocks=false}=State) ->
+full(checkout, _From, #state{checkout_blocks=false}=State) ->
     {reply, full, full, State};
 full(checkout, From, #state{waiting=Waiting}=State) ->
     {next_state, full, State#state{waiting=queue:in(From, Waiting)}};
