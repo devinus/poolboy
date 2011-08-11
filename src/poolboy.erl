@@ -8,7 +8,7 @@
          handle_sync_event/4, handle_info/3, terminate/3, code_change/4]).
 
 -record(state, {workers, worker_sup, waiting=queue:new(), monitors=[],
-                size=5, overflow=0, max_overflow=10}).
+                size=5, overflow=0, max_overflow=10, checkout_blocks=true}).
 
 checkin(Pool, Worker) ->
     gen_fsm:send_event(Pool, {checkin, Worker}).
@@ -35,6 +35,8 @@ init([{size, PoolSize} | Rest], State) ->
     init(Rest, State#state{size=PoolSize});
 init([{max_overflow, MaxOverflow} | Rest], State) ->
     init(Rest, State#state{max_overflow=MaxOverflow});
+init([{checkout_blocks, CheckoutBlocks} | Rest], State) ->
+    init(Rest, State#state{checkout_blocks=CheckoutBlocks});
 init([_ | Rest], State) ->
     init(Rest, State);
 init([], #state{size=Size, worker_sup=Sup}=State) ->
@@ -52,7 +54,8 @@ ready(_Event, State) ->
     {next_state, ready, State}.
 
 ready(checkout, {FromPid, _} = From, #state{workers=Workers, worker_sup=Sup,
-                                  max_overflow=MaxOverflow}=State) ->
+                                  max_overflow=MaxOverflow,
+                                  checkout_blocks=Blocks}=State) ->
     case queue:out(Workers) of
         {{value, Pid}, Left} ->
             Ref = erlang:monitor(process, FromPid),
@@ -65,6 +68,9 @@ ready(checkout, {FromPid, _} = From, #state{workers=Workers, worker_sup=Sup,
             {reply, Pid, overflow, State#state{workers=Empty,
                                                monitors=Monitors,
                                                overflow=1}};
+        {empty, Empty}  when Blocks == false ->
+            %% don't block the calling process
+            {reply, full, full, State};
         {empty, Empty} ->
             Waiting = State#state.waiting,
             {next_state, full, State#state{workers=Empty,
@@ -118,6 +124,8 @@ full({checkin, Pid}, #state{waiting=Waiting, max_overflow=MaxOverflow}=State) ->
 full(_Event, State) ->
     {next_state, full, State}.
 
+full(checkout, From, #state{checkout_blocks=false}=State) ->
+    {reply, full, full, State};
 full(checkout, From, #state{waiting=Waiting}=State) ->
     {next_state, full, State#state{waiting=queue:in(From, Waiting)}};
 full(_Event, _From, State) ->
