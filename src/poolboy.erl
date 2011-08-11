@@ -51,16 +51,16 @@ ready({checkin, Pid}, State) ->
 ready(_Event, State) ->
     {next_state, ready, State}.
 
-ready(checkout, {From, _}, #state{workers=Workers, worker_sup=Sup,
+ready(checkout, {FromPid, _} = From, #state{workers=Workers, worker_sup=Sup,
                                   max_overflow=MaxOverflow}=State) ->
     case queue:out(Workers) of
         {{value, Pid}, Left} ->
-            Ref = erlang:monitor(process, From),
+            Ref = erlang:monitor(process, FromPid),
             Monitors = [{Pid, Ref} | State#state.monitors],
             {reply, Pid, ready, State#state{workers=Left,
                                             monitors=Monitors}};
         {empty, Empty} when MaxOverflow > 0 ->
-            {Pid, Ref} = new_worker(Sup, From),
+            {Pid, Ref} = new_worker(Sup, FromPid),
             Monitors = [{Pid, Ref} | State#state.monitors],
             {reply, Pid, overflow, State#state{workers=Empty,
                                                monitors=Monitors,
@@ -97,9 +97,9 @@ overflow(_Event, _From, State) ->
 
 full({checkin, Pid}, #state{waiting=Waiting}=State) ->
     case queue:out(Waiting) of
-        {{value, From}, Left} ->
-            Ref = erlang:monitor(process, From),
-            Monitors = [{Pid, Ref} | State#state.monitors],
+        {{value, {FromPid, _} = From}, Left} ->
+            Ref = erlang:monitor(process, FromPid),
+            Monitors = [{FromPid, Ref} | State#state.monitors],
             gen_fsm:reply(From, Pid),
             {next_state, full, State#state{waiting=Left,
                                            monitors=Monitors}};
