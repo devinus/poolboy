@@ -148,6 +148,7 @@ handle_info({'DOWN', Ref, _, _, _}, StateName, State) ->
     {next_state, StateName, State};
 handle_info({'EXIT', Pid, _}, StateName, #state{worker_sup=Sup,
                                                 overflow=Overflow,
+                                                waiting=Waiting,
                                                 max_overflow=MaxOverflow}=State) ->
     Monitors = case lists:keytake(Pid, 1, State#state.monitors) of
         {value, {_, Ref}, Left} -> erlang:demonitor(Ref), Left;
@@ -163,9 +164,32 @@ handle_info({'EXIT', Pid, _}, StateName, #state{worker_sup=Sup,
         overflow ->
             {next_state, overflow, State#state{monitors=Monitors,
                                                overflow=Overflow-1}};
+        full when MaxOverflow < 1 ->
+            case queue:out(Waiting) of
+              {{value, {FromPid, _} = From}, LeftWaiting} ->
+                  MonitorRef = erlang:monitor(process, FromPid),
+                  Monitors2 = [{FromPid, MonitorRef} | Monitors],
+                  NewWorker = new_worker(Sup),
+                  gen_fsm:reply(From, NewWorker),
+                  {next_state, full, State#state{waiting=LeftWaiting,
+                          monitors=Monitors2}};
+              {empty, Empty} ->
+                  {next_state, ready, State#state{monitors=Monitors,waiting=Empty,
+                          workers=queue:in(new_worker(Sup), State#state.workers)}}
+          end;
         full when Overflow =< MaxOverflow ->
-            {next_state, overflow, State#state{monitors=Monitors,
-                                               overflow=Overflow-1}};
+            case queue:out(Waiting) of
+              {{value, {FromPid, _} = From}, LeftWaiting} ->
+                  MonitorRef = erlang:monitor(process, FromPid),
+                  Monitors2 = [{FromPid, MonitorRef} | Monitors],
+                  NewWorker = new_worker(Sup),
+                  gen_fsm:reply(From, NewWorker),
+                  {next_state, full, State#state{waiting=LeftWaiting,
+                          monitors=Monitors2}};
+              {empty, Empty} ->
+                  {next_state, overflow, State#state{monitors=Monitors,
+                          overflow=Overflow-1, waiting=Empty}}
+          end;
         full ->
             {next_state, full, State#state{monitors=Monitors,
                                            overflow=Overflow-1}}
