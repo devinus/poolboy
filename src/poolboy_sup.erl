@@ -1,3 +1,5 @@
+%% Poolboy - A hunky Erlang worker pool factory
+
 -module(poolboy_sup).
 -behaviour(supervisor).
 

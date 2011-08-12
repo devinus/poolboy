@@ -144,3 +144,9 @@ Options
 - `worker_module`: the module that represents the workers
 - `size`: maximum pool size
 - `max_overflow`: maximum number of workers created if pool is empty
+
+Authors
+-------
+Devin Torres (devinus) <devin@devintorres.com>
+Kurt Williams (onkel-dirtus) <kurt.r.williams@gmail.com>
+Andrew Thompson (Vagabond) <andrew@hijacked.us>

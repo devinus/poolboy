@@ -1,4 +1,4 @@
-%% Poolboy by Devin Torres <devin@devintorres.com>
+%% Poolboy - A hunky Erlang worker pool factory
 
 -module(poolboy).
 -behaviour(gen_fsm).
