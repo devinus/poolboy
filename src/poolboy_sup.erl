@@ -1,5 +1,3 @@
-% Poolboy by Devin Torres <devin@devintorres.com>
-
 -module(poolboy_sup).
 -behaviour(supervisor).
 

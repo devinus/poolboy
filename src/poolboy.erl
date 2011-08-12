@@ -1,4 +1,4 @@
-% Poolboy by Devin Torres <devin@devintorres.com>
+%% Poolboy by Devin Torres <devin@devintorres.com>
 
 -module(poolboy).
 -behaviour(gen_fsm).
@@ -47,16 +47,16 @@ ready({checkin, Pid}, State) ->
 ready(_Event, State) ->
     {next_state, ready, State}.
 
-ready(checkout, {From, _}, #state{workers=Workers, worker_sup=Sup,
-                                  max_overflow=MaxOverflow}=State) ->
+ready(checkout, {FromPid, _}=From, #state{workers=Workers, worker_sup=Sup,
+                                          max_overflow=MaxOverflow}=State) ->
     case queue:out(Workers) of
         {{value, Pid}, Left} ->
-            Ref = erlang:monitor(process, From),
+            Ref = erlang:monitor(process, FromPid),
             Monitors = [{Pid, Ref} | State#state.monitors],
             {reply, Pid, ready, State#state{workers=Left,
                                             monitors=Monitors}};
         {empty, Empty} when MaxOverflow > 0 ->
-            {Pid, Ref} = new_worker(Sup, From),
+            {Pid, Ref} = new_worker(Sup, FromPid),
             Monitors = [{Pid, Ref} | State#state.monitors],
             {reply, Pid, overflow, State#state{workers=Empty,
                                                monitors=Monitors,
@@ -82,9 +82,9 @@ overflow(checkout, From, #state{overflow=Overflow,
          max_overflow=MaxOverflow}=State) when Overflow >= MaxOverflow ->
     Waiting = State#state.waiting,
     {next_state, full, State#state{waiting=queue:in(From, Waiting)}};
-overflow(checkout, {From, _}, #state{worker_sup=Sup,
-                                     overflow=Overflow}=State) ->
-    {Pid, Ref} = new_worker(Sup, From),
+overflow(checkout, {FromPid, _}, #state{worker_sup=Sup,
+                                        overflow=Overflow}=State) ->
+    {Pid, Ref} = new_worker(Sup, FromPid),
     Monitors = [{Pid, Ref} | State#state.monitors],
     {reply, Pid, overflow, State#state{monitors=Monitors,
                                        overflow=Overflow+1}};
@@ -93,8 +93,8 @@ overflow(_Event, _From, State) ->
 
 full({checkin, Pid}, #state{waiting=Waiting}=State) ->
     case queue:out(Waiting) of
-        {{value, From}, Left} ->
-            Ref = erlang:monitor(process, From),
+        {{value, {FromPid, _}=From}, Left} ->
+            Ref = erlang:monitor(process, FromPid),
             Monitors = [{Pid, Ref} | State#state.monitors],
             gen_fsm:reply(From, Pid),
             {next_state, full, State#state{waiting=Left,
@@ -161,9 +161,9 @@ new_worker(Sup) ->
     link(Pid),
     Pid.
 
-new_worker(Sup, From) ->
+new_worker(Sup, FromPid) ->
     Pid = new_worker(Sup),
-    Ref = erlang:monitor(process, From),
+    Ref = erlang:monitor(process, FromPid),
     {Pid, Ref}.
 
 dismiss_worker(Pid) ->
