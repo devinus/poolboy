@@ -1,1 +1,3 @@
+*.app
 *.beam
+.dialyzer_plt
