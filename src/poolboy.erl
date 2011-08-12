@@ -101,7 +101,8 @@ overflow(checkout, {From, _}, #state{worker_sup=Sup,
 overflow(_Event, _From, State) ->
     {reply, ok, overflow, State}.
 
-full({checkin, Pid}, #state{waiting=Waiting, max_overflow=MaxOverflow}=State) ->
+full({checkin, Pid}, #state{waiting=Waiting, max_overflow=MaxOverflow,
+    overflow=Overflow}=State) ->
     case queue:out(Waiting) of
         {{value, {FromPid, _} = From}, Left} ->
             Ref = erlang:monitor(process, FromPid),
@@ -119,7 +120,8 @@ full({checkin, Pid}, #state{waiting=Waiting, max_overflow=MaxOverflow}=State) ->
                     monitors=Monitors}};
         {empty, Empty} ->
             dismiss_worker(Pid),
-            {next_state, overflow, State#state{waiting=Empty}}
+            {next_state, overflow, State#state{waiting=Empty,
+                overflow=Overflow-1}}
     end;
 full(_Event, State) ->
     {next_state, full, State}.
