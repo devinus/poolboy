@@ -1,15 +1,18 @@
 Poolboy - A hunky Erlang worker pool factory
 ============================================
 
-## Usage
+Usage
+-----
 
 ```erlang
 Worker = poolboy:checkout(PoolName),
 Reply = gen_server:call(Worker, WorkerFun),
-poolboy:checkin(PoolName, Worker).
+poolboy:checkin(PoolName, Worker),
+Reply.
 ```
 
-## Example Application
+Example Application
+-------------------
 
 ### example.app
 
@@ -63,7 +66,7 @@ stop(_State) -> ok.
 init([]) ->
     {ok, Pools} = application:get_env(example, pools),
     PoolSpecs = lists:map(fun({PoolName, PoolConfig}) ->
-        Args = [{name, {local, PoolName}}, 
+        Args = [{name, {local, PoolName}},
                 {worker_module, example_worker}]
                 ++ PoolConfig,
         {PoolName, {poolboy, start_link, [Args]},
@@ -134,7 +137,8 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 ```
 
-## Options
+Options
+-------
 
 - `name`: the pool name
 - `worker_module`: the module that represents the workers
