@@ -17,8 +17,12 @@ checkout(Pool) ->
     gen_fsm:sync_send_event(Pool, checkout).
 
 start_link(Args) ->
-    Name = proplists:get_value(name, Args),
-    gen_fsm:start_link(Name, ?MODULE, Args, []).
+    case proplists:get_value(name, Args) of
+        undefined ->
+            gen_fsm:start_link(?MODULE, Args, []);
+        Name ->
+            gen_fsm:start_link(Name, ?MODULE, Args, [])
+    end.
 
 init(Args) ->
     process_flag(trap_exit, true),
