@@ -89,9 +89,15 @@ overflow(_Event, State) ->
     {next_state, overflow, State}.
 
 overflow(checkout, From, #state{overflow=Overflow,
-         max_overflow=MaxOverflow}=State) when Overflow >= MaxOverflow ->
-    Waiting = State#state.waiting,
-    {next_state, full, State#state{waiting=queue:in(From, Waiting)}};
+         max_overflow=MaxOverflow,
+         checkout_blocks=Blocks}=State) when Overflow >= MaxOverflow ->
+    case Blocks of
+        false ->
+            {reply, full, full, State};
+        _ ->
+            Waiting = State#state.waiting,
+            {next_state, full, State#state{waiting=queue:in(From, Waiting)}}
+    end;
 overflow(checkout, {From, _}, #state{worker_sup=Sup,
                                      overflow=Overflow}=State) ->
     {Pid, Ref} = new_worker(Sup, From),

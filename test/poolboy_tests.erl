@@ -299,5 +299,43 @@ worker_death_while_full_no_overflow_test() ->
 
     ok = gen_fsm:sync_send_all_state_event(Pid, stop).
 
+pool_full_nonblocking_no_overflow_test() ->
+    %% check that when the pool is full, checkouts return 'full' when the
+    %% option to checkouts nonblocking is enabled.
+    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}},
+            {worker_module, poolboy_test_worker},
+            {size, 5}, {max_overflow, 0}, {checkout_blocks, false}]),
+    Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 4)],
+    ?assertEqual(0, length(gen_fsm:sync_send_all_state_event(Pid,
+                get_avail_workers))),
+    ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
+                get_all_workers))),
+    ?assertEqual(full, poolboy:checkout(Pid)),
+    ?assertEqual(full, poolboy:checkout(Pid)),
+    A = hd(Workers),
+    poolboy:checkin(Pid, A),
+    ?assertEqual(A, poolboy:checkout(Pid)),
+    ok = gen_fsm:sync_send_all_state_event(Pid, stop).
+
+pool_full_nonblocking_test() ->
+    %% check that when the pool is full, checkouts return 'full' when the
+    %% option to checkouts nonblocking is enabled.
+    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}},
+            {worker_module, poolboy_test_worker},
+            {size, 5}, {max_overflow, 5}, {checkout_blocks, false}]),
+    Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 9)],
+    ?assertEqual(0, length(gen_fsm:sync_send_all_state_event(Pid,
+                get_avail_workers))),
+    ?assertEqual(10, length(gen_fsm:sync_send_all_state_event(Pid,
+                get_all_workers))),
+    ?assertEqual(full, poolboy:checkout(Pid)),
+    A = hd(Workers),
+    poolboy:checkin(Pid, A),
+    NewWorker = poolboy:checkout(Pid),
+    ?assertEqual(false, is_process_alive(A)), %% overflow workers get shut down
+    ?assert(is_pid(NewWorker)),
+    ?assertEqual(full, poolboy:checkout(Pid)),
+    ok = gen_fsm:sync_send_all_state_event(Pid, stop).
+
 -endif.
 
