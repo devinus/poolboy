@@ -1,4 +1,4 @@
-.PHONY: all compile clean
+.PHONY: all compile clean test
 
 all: compile
 
@@ -7,3 +7,6 @@ compile:
 
 clean:
 	@./rebar clean
+
+test:
+	@./rebar compile eunit
