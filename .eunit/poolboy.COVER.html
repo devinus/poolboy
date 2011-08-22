@@ -1,0 +1,251 @@
+<html>
+<head><title>.eunit/poolboy.COVER.html</title></head><body bgcolor=white text=black>
+<pre>
+File generated from /Users/devin/Projects/poolboy/.eunit/poolboy.erl by COVER 2011-08-22 at 15:04:19
+
+****************************************************************************
+
+        |  %% Poolboy - A hunky Erlang worker pool factory
+        |  
+        |  -module(poolboy).
+        |  -behaviour(gen_fsm).
+        |  
+        |  -export([checkout/1, checkin/2, start_link/1, init/1, ready/2, ready/3,
+        |           overflow/2, overflow/3, full/2, full/3, handle_event/3,
+        |           handle_sync_event/4, handle_info/3, terminate/3, code_change/4]).
+        |  
+        |  -record(state, {workers, worker_sup, waiting=queue:new(), monitors=[],
+        |                  size=5, overflow=0, max_overflow=10, checkout_blocks=true}).
+        |  
+        |  checkin(Pool, Worker) -&gt;
+    24..|      gen_fsm:send_event(Pool, {checkin, Worker}).
+        |  
+        |  checkout(Pool) -&gt;
+    68..|      gen_fsm:sync_send_event(Pool, checkout).
+        |  
+        |  start_link(Args) -&gt;
+     9..|      case proplists:get_value(name, Args) of
+        |          undefined -&gt;
+<font color=red>     0..|              gen_fsm:start_link(?MODULE, Args, []);</font>
+        |          Name -&gt;
+     9..|              gen_fsm:start_link(Name, ?MODULE, Args, [])
+        |      end.
+        |  
+        |  init(Args) -&gt;
+     9..|      process_flag(trap_exit, true),
+     9..|      init(Args, #state{}).
+        |  
+        |  init([{worker_module, Mod} | Rest], State) -&gt;
+     9..|      {ok, Sup} = poolboy_sup:start_link(Mod, Rest),
+     9..|      init(Rest, State#state{worker_sup=Sup});
+        |  init([{size, PoolSize} | Rest], State) -&gt;
+     9..|      init(Rest, State#state{size=PoolSize});
+        |  init([{max_overflow, MaxOverflow} | Rest], State) -&gt;
+     9..|      init(Rest, State#state{max_overflow=MaxOverflow});
+        |  init([{checkout_blocks, CheckoutBlocks} | Rest], State) -&gt;
+     2..|      init(Rest, State#state{checkout_blocks=CheckoutBlocks});
+        |  init([_ | Rest], State) -&gt;
+     9..|      init(Rest, State);
+        |  init([], #state{size=Size, worker_sup=Sup}=State) -&gt;
+     9..|      Workers = prepopulate(Size, Sup),
+     9..|      {ok, ready, State#state{workers=Workers}}.
+        |  
+        |  ready({checkin, Pid}, State) -&gt;
+    15..|      Workers = queue:in(Pid, State#state.workers),
+    15..|      Monitors = case lists:keytake(Pid, 1, State#state.monitors) of
+    15..|          {value, {_, Ref}, Left} -&gt; erlang:demonitor(Ref), Left;
+<font color=red>     0..|          false -&gt; []</font>
+        |      end,
+    15..|      {next_state, ready, State#state{workers=Workers, monitors=Monitors}};
+        |  ready(_Event, State) -&gt;
+<font color=red>     0..|      {next_state, ready, State}.</font>
+        |  
+        |  ready(checkout, {FromPid, _} = From, #state{workers=Workers, worker_sup=Sup,
+        |                                    max_overflow=MaxOverflow,
+        |                                    checkout_blocks=Blocks}=State) -&gt;
+    54..|      case queue:out(Workers) of
+        |          {{value, Pid}, Left} -&gt;
+    46..|              Ref = erlang:monitor(process, FromPid),
+    46..|              Monitors = [{Pid, Ref} | State#state.monitors],
+    46..|              {reply, Pid, ready, State#state{workers=Left,
+        |                                              monitors=Monitors}};
+        |          {empty, Empty} when MaxOverflow &gt; 0 -&gt;
+     5..|              {Pid, Ref} = new_worker(Sup, FromPid),
+     5..|              Monitors = [{Pid, Ref} | State#state.monitors],
+     5..|              {reply, Pid, overflow, State#state{workers=Empty,
+        |                                                 monitors=Monitors,
+        |                                                 overflow=1}};
+        |          {empty, Empty}  when Blocks == false -&gt;
+        |              %% don't block the calling process
+     1..|              {reply, full, full, State#state{workers=Empty}};
+        |          {empty, Empty} -&gt;
+     2..|              Waiting = State#state.waiting,
+     2..|              {next_state, full, State#state{workers=Empty,
+        |                                             waiting=queue:in(From, Waiting)}}
+        |      end;
+        |  ready(_Event, _From, State) -&gt;
+<font color=red>     0..|      {reply, ok, ready, State}.</font>
+        |  
+        |  overflow({checkin, Pid}, #state{overflow=1}=State) -&gt;
+     2..|      dismiss_worker(Pid),
+     2..|      {next_state, ready, State#state{overflow=0}};
+        |  overflow({checkin, Pid}, #state{overflow=Overflow}=State) -&gt;
+     1..|      dismiss_worker(Pid),
+     1..|      {next_state, overflow, State#state{overflow=Overflow-1}};
+        |  overflow(_Event, State) -&gt;
+<font color=red>     0..|      {next_state, overflow, State}.</font>
+        |  
+        |  overflow(checkout, From, #state{overflow=Overflow,
+        |           max_overflow=MaxOverflow,
+        |           checkout_blocks=Blocks}=State) when Overflow &gt;= MaxOverflow -&gt;
+     4..|      case Blocks of
+        |          false -&gt;
+     2..|              {reply, full, full, State};
+        |          _ -&gt;
+     2..|              Waiting = State#state.waiting,
+     2..|              {next_state, full, State#state{waiting=queue:in(From, Waiting)}}
+        |      end;
+        |  overflow(checkout, {From, _}, #state{worker_sup=Sup,
+        |                                       overflow=Overflow}=State) -&gt;
+     9..|      {Pid, Ref} = new_worker(Sup, From),
+     9..|      Monitors = [{Pid, Ref} | State#state.monitors],
+     9..|      {reply, Pid, overflow, State#state{monitors=Monitors,
+        |                                         overflow=Overflow+1}};
+        |  overflow(_Event, _From, State) -&gt;
+<font color=red>     0..|      {reply, ok, overflow, State}.</font>
+        |  
+        |  full({checkin, Pid}, #state{waiting=Waiting, max_overflow=MaxOverflow,
+        |      overflow=Overflow}=State) -&gt;
+     6..|      case queue:out(Waiting) of
+        |          {{value, {FromPid, _}=From}, Left} -&gt;
+     2..|              Ref = erlang:monitor(process, FromPid),
+     2..|              Monitors = [{Pid, Ref} | State#state.monitors],
+     2..|              gen_fsm:reply(From, Pid),
+     2..|              {next_state, full, State#state{waiting=Left,
+        |                                             monitors=Monitors}};
+        |          {empty, Empty} when MaxOverflow &lt; 1 -&gt;
+     2..|              Workers = queue:in(Pid, State#state.workers),
+     2..|              Monitors = case lists:keytake(Pid, 1, State#state.monitors) of
+     2..|                  {value, {_, Ref}, Left} -&gt; erlang:demonitor(Ref), Left;
+<font color=red>     0..|                  false -&gt; []</font>
+        |              end,
+     2..|              {next_state, ready, State#state{workers=Workers, waiting=Empty,
+        |                                              monitors=Monitors}};
+        |          {empty, Empty} -&gt;
+     2..|              dismiss_worker(Pid),
+     2..|              {next_state, overflow, State#state{waiting=Empty,
+        |                  overflow=Overflow-1}}
+        |      end;
+        |  full(_Event, State) -&gt;
+<font color=red>     0..|      {next_state, full, State}.</font>
+        |  
+        |  full(checkout, _From, #state{checkout_blocks=false}=State) -&gt;
+     1..|      {reply, full, full, State};
+        |  full(checkout, From, #state{waiting=Waiting}=State) -&gt;
+<font color=red>     0..|      {next_state, full, State#state{waiting=queue:in(From, Waiting)}};</font>
+        |  full(_Event, _From, State) -&gt;
+<font color=red>     0..|      {reply, ok, full, State}.</font>
+        |  
+        |  handle_event(_Event, StateName, State) -&gt;
+<font color=red>     0..|    {next_state, StateName, State}.</font>
+        |  
+        |  handle_sync_event(get_avail_workers, _From, StateName, #state{workers=Workers}=State) -&gt;
+    31..|    WorkerList = queue:to_list(Workers),
+    31..|    {reply, WorkerList, StateName, State};
+        |  handle_sync_event(get_all_workers, _From, StateName, #state{worker_sup=Sup}=State) -&gt;
+    24..|    WorkerList = supervisor:which_children(Sup),
+    24..|    {reply, WorkerList, StateName, State};
+        |  handle_sync_event(stop, _From, _StateName, State) -&gt;
+     9..|    {stop, normal, ok, State};
+        |  handle_sync_event(_Event, _From, StateName, State) -&gt;
+<font color=red>     0..|    Reply = {error, invalid_message},</font>
+<font color=red>     0..|    {reply, Reply, StateName, State}.</font>
+        |  
+        |  handle_info({'DOWN', Ref, _, _, _}, StateName, State) -&gt;
+     3..|      case lists:keytake(Ref, 2, State#state.monitors) of
+     3..|          {value, {Pid, _}, _} -&gt; dismiss_worker(Pid);
+<font color=red>     0..|          false -&gt; false</font>
+        |      end,
+     3..|      {next_state, StateName, State};
+        |  handle_info({'EXIT', Pid, _}, StateName, #state{worker_sup=Sup,
+        |                                                  overflow=Overflow,
+        |                                                  waiting=Waiting,
+        |                                                  max_overflow=MaxOverflow}=State) -&gt;
+    11..|      Monitors = case lists:keytake(Pid, 1, State#state.monitors) of
+    11..|          {value, {_, Ref}, Left} -&gt; erlang:demonitor(Ref), Left;
+<font color=red>     0..|          false -&gt; []</font>
+        |      end,
+    11..|      case StateName of
+        |          ready -&gt;
+     5..|              W = queue:filter(fun (P) -&gt; P =/= Pid end, State#state.workers),
+     5..|              {next_state, ready, State#state{workers=queue:in(new_worker(Sup), W),
+        |                                              monitors=Monitors}};
+        |          overflow when Overflow =&lt; 1 -&gt;
+     1..|              {next_state, ready, State#state{monitors=Monitors, overflow=0}};
+        |          overflow -&gt;
+     1..|              {next_state, overflow, State#state{monitors=Monitors,
+        |                                                 overflow=Overflow-1}};
+        |          full when MaxOverflow &lt; 1 -&gt;
+     2..|              case queue:out(Waiting) of
+        |                {{value, {FromPid, _} = From}, LeftWaiting} -&gt;
+     1..|                    MonitorRef = erlang:monitor(process, FromPid),
+     1..|                    Monitors2 = [{FromPid, MonitorRef} | Monitors],
+     1..|                    NewWorker = new_worker(Sup),
+     1..|                    gen_fsm:reply(From, NewWorker),
+     1..|                    {next_state, full, State#state{waiting=LeftWaiting,
+        |                            monitors=Monitors2}};
+        |                {empty, Empty} -&gt;
+     1..|                    {next_state, ready, State#state{monitors=Monitors,waiting=Empty,
+        |                            workers=queue:in(new_worker(Sup), State#state.workers)}}
+        |            end;
+        |          full when Overflow =&lt; MaxOverflow -&gt;
+     2..|              case queue:out(Waiting) of
+        |                {{value, {FromPid, _} = From}, LeftWaiting} -&gt;
+     1..|                    MonitorRef = erlang:monitor(process, FromPid),
+     1..|                    Monitors2 = [{FromPid, MonitorRef} | Monitors],
+     1..|                    NewWorker = new_worker(Sup),
+     1..|                    gen_fsm:reply(From, NewWorker),
+     1..|                    {next_state, full, State#state{waiting=LeftWaiting,
+        |                            monitors=Monitors2}};
+        |                {empty, Empty} -&gt;
+     1..|                    {next_state, overflow, State#state{monitors=Monitors,
+        |                            overflow=Overflow-1, waiting=Empty}}
+        |            end;
+        |          full -&gt;
+<font color=red>     0..|              {next_state, full, State#state{monitors=Monitors,</font>
+        |                                             overflow=Overflow-1}}
+        |      end;
+        |  handle_info(_Info, StateName, State) -&gt;
+<font color=red>     0..|      {next_state, StateName, State}.</font>
+        |  
+     9..|  terminate(_Reason, _StateName, _State) -&gt; ok.
+        |  
+        |  code_change(_OldVsn, StateName, State, _Extra) -&gt;
+<font color=red>     0..|      {ok, StateName, State}.</font>
+        |  
+        |  new_worker(Sup) -&gt;
+    72..|      {ok, Pid} = supervisor:start_child(Sup, []),
+    72..|      link(Pid),
+    72..|      Pid.
+        |  
+        |  new_worker(Sup, FromPid) -&gt;
+    14..|      Pid = new_worker(Sup),
+    14..|      Ref = erlang:monitor(process, FromPid),
+    14..|      {Pid, Ref}.
+        |  
+        |  dismiss_worker(Pid) -&gt;
+     8..|      unlink(Pid),
+     8..|      Pid ! stop.
+        |  
+        |  prepopulate(0, _Sup) -&gt;
+<font color=red>     0..|      queue:new();</font>
+        |  prepopulate(N, Sup) -&gt;
+     9..|      prepopulate(N, Sup, queue:new()).
+        |  
+        |  prepopulate(0, _Sup, Workers) -&gt;
+     9..|      Workers;
+        |  prepopulate(N, Sup, Workers) -&gt;
+    50..|      prepopulate(N-1, Sup, queue:in(new_worker(Sup), Workers)).
+</pre>
+</body>
+</html>
