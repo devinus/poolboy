@@ -8,7 +8,7 @@
          handle_sync_event/4, handle_info/3, terminate/3, code_change/4]).
 
 -record(state, {workers, worker_sup, waiting=queue:new(), monitors=[],
-                size=5, overflow=0, max_overflow=10}).
+                size=5, overflow=0, max_overflow=10, dump_state=false}).
 
 checkin(Pool, Worker) ->
     gen_fsm:send_event(Pool, {checkin, Worker}).
@@ -35,6 +35,8 @@ init([{size, PoolSize} | Rest], State) ->
     init(Rest, State#state{size=PoolSize});
 init([{max_overflow, MaxOverflow} | Rest], State) ->
     init(Rest, State#state{max_overflow=MaxOverflow});
+init([{dump_state, true} | Rest], State) ->
+    init(Rest, State#state{dump_state=true});
 init([_ | Rest], State) ->
     init(Rest, State);
 init([], #state{size=Size, worker_sup=Sup}=State) ->
@@ -53,6 +55,7 @@ ready(_Event, State) ->
 
 ready(checkout, {FromPid, _}=From, #state{workers=Workers, worker_sup=Sup,
                                           max_overflow=MaxOverflow}=State) ->
+    dump_state(State),
     case queue:out(Workers) of
         {{value, Pid}, Left} ->
             Ref = erlang:monitor(process, FromPid),
@@ -192,3 +195,14 @@ prepopulate(0, _Sup, Workers) ->
     Workers;
 prepopulate(N, Sup, Workers) ->
     prepopulate(N-1, Sup, queue:in(new_worker(Sup), Workers)).
+
+dump_state(#state{dump_state=false}) ->
+  ok;
+dump_state(#state{workers=Workers,waiting=Waiting,size=Size,overflow=Overflow,max_overflow=MaxOverflow}) ->
+  error_logger:info_msg(
+    "worker pool state:~n"
+    "size = ~p~n"
+    "max_overflow = ~p~n"
+    "overflow = ~p~n"
+    "num workers = ~p~n"
+    "queue length = ~p~n",[Size,MaxOverflow,Overflow,queue:len(Workers),queue:len(Waiting)]).
