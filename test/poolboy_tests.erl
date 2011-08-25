@@ -22,25 +22,25 @@ pool_test_() ->
             {"Pool overflow should work",
                 fun pool_overflow/0
             },
-            {"Pool behaves right when its empty",
+            {"Pool behaves right when it's empty",
                 fun pool_empty/0
             },
-            {"Pool behaves right when its empty and oveflow is disabled",
+            {"Pool behaves right when it's empty and oveflow is disabled",
                 fun pool_empty_no_overflow/0
             },
             {"Pool behaves right on worker death",
                 fun worker_death/0
             },
-            {"Pool behaves right when its full and a worker dies",
+            {"Pool behaves right when it's full and a worker dies",
                 fun worker_death_while_full/0
             },
-            {"Pool behaves right when its full, a worker dies and overflow is disabled",
+            {"Pool behaves right when it's full, a worker dies and overflow is disabled",
                 fun worker_death_while_full_no_overflow/0
             },
-            {"Non-blocking pool behaves when its full and overflow is disabled",
+            {"Non-blocking pool behaves when it's full and overflow is disabled",
                 fun pool_full_nonblocking_no_overflow/0
             },
-            {"Non-blocking pool behaves when its full",
+            {"Non-blocking pool behaves when it's full",
                 fun pool_full_nonblocking/0
             }
         ]
@@ -57,7 +57,7 @@ kill_worker(Pid) ->
     end.
 
 checkin_worker(Pid, Worker) ->
-    %% there's no easy way to wait for a checkin to complete, because its
+    %% there's no easy way to wait for a checkin to complete, because it's
     %% async and the supervisor may kill the process if it was an overflow
     %% worker. Yhe only solution seems to be a nasty hardcoded sleep.
     poolboy:checkin(Pid, Worker),
