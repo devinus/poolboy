@@ -1,0 +1,47 @@
+<html>
+<head><title>.eunit/poolboy_test_worker.COVER.html</title></head><body bgcolor=white text=black>
+<pre>
+File generated from /Users/devin/Projects/poolboy/.eunit/poolboy_test_worker.erl by COVER 2011-08-25 at 12:43:42
+
+****************************************************************************
+
+        |  -module(poolboy_test_worker).
+        |  
+        |  -behaviour(gen_server).
+        |  
+        |  -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
+        |          code_change/3]).
+        |  -export([start_link/1]).
+        |  
+        |  -record(state, {
+        |      }).
+        |  
+        |  -include_lib("eunit/include/eunit.hrl").
+        |  
+        |  start_link(_Args) -&gt;
+    72..|      gen_server:start_link(?MODULE, [], []).
+        |  
+        |  init([]) -&gt;
+    72..|      {ok, #state{}}.
+        |  
+        |  handle_call(die, _From, State) -&gt;
+    11..|      {stop, {error, died}, dead, State};
+        |  handle_call(_Event, _From, State) -&gt;
+<font color=red>     0..|      {reply, ok, State}.</font>
+        |  
+        |  handle_cast(_Event, State) -&gt;
+<font color=red>     0..|      {noreply, State}.</font>
+        |  
+        |  handle_info(stop, State) -&gt;
+     5..|      {stop, normal, State};
+        |  handle_info(_Info, State) -&gt;
+<font color=red>     0..|      {noreply, State}.</font>
+        |  
+        |  terminate(_Reason, _State) -&gt;
+    16..|      ok.
+        |  
+        |  code_change(_OldVsn, State, _Extra) -&gt;
+<font color=red>     0..|      {ok, State}.</font>
+</pre>
+</body>
+</html>
