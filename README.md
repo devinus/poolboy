@@ -150,3 +150,9 @@ Authors
 - Devin Torres (devinus) <devin@devintorres.com>
 - Kurt Williams (onkel-dirtus) <kurt.r.williams@gmail.com>
 - Andrew Thompson (Vagabond) <andrew@hijacked.us>
+
+License
+-------
+Poolboy is available in the public domain (see `UNLICENSE`).
+Poolboy is also available under the Apache License (see `LICENSE`), meant
+especially for jurisdictions that do not recognize public domain works.
