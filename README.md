@@ -27,7 +27,7 @@ Example Application
     {env, [
         {pools, [
             {pool1, [
-                {pool_size, 10},
+                {size, 10},
                 {max_overflow, 20},
                 {hostname, "127.0.0.1"},
                 {database, "db1"},
@@ -35,7 +35,7 @@ Example Application
                 {password, "abc123"}
             ]},
             {pool2, [
-                {pool_size, 5},
+                {size, 5},
                 {max_overflow, 10},
                 {hostname, "127.0.0.1"},
                 {database, "db2"},

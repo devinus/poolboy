@@ -14,7 +14,7 @@ checkin(Pool, Worker) ->
     gen_fsm:send_event(Pool, {checkin, Worker}).
 
 checkout(Pool) ->
-    gen_fsm:sync_send_event(Pool, checkout).
+    gen_fsm:sync_send_event(Pool, checkout, infinity).
 
 start_link(Args) ->
     case proplists:get_value(name, Args) of
