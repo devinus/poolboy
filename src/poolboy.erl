@@ -148,7 +148,8 @@ handle_sync_event(get_avail_workers, _From, StateName, #state{workers=Workers}=S
 handle_sync_event(get_all_workers, _From, StateName, #state{worker_sup=Sup}=State) ->
   WorkerList = supervisor:which_children(Sup),
   {reply, WorkerList, StateName, State};
-handle_sync_event(stop, _From, _StateName, State) ->
+handle_sync_event(stop, _From, _StateName, #state{worker_sup=Sup}=State) ->
+  exit(Sup, shutdown),
   {stop, normal, ok, State};
 handle_sync_event(_Event, _From, StateName, State) ->
   Reply = {error, invalid_message},
