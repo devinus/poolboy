@@ -156,7 +156,7 @@ handle_sync_event(_Event, _From, StateName, State) ->
 
 handle_info({'DOWN', Ref, _, _, _}, StateName, State) ->
     Monitors = case lists:keytake(Ref, 2, State#state.monitors) of
-       	           {value, {Pid, _}, Left} -> dismiss_worker(Pid), Left;
+                   {value, {Pid, _}, Left} -> dismiss_worker(Pid), Left;
                    false -> State#state.monitors
 	       end,
     {next_state, StateName, State#state{monitors=Monitors}};
