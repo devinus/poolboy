@@ -42,6 +42,9 @@ pool_test_() ->
             },
             {"Non-blocking pool behaves when it's full",
                 fun pool_full_nonblocking/0
+            },
+            {"Pool behaves right on user death",
+                fun user_death/0
             }
         ]
     }.
@@ -78,6 +81,8 @@ pool_startup() ->
     checkin_worker(Pid, Worker),
     ?assertEqual(9, length(gen_fsm:sync_send_all_state_event(Pid,
                 get_avail_workers))),
+    ?assertEqual(1, length(gen_fsm:sync_send_all_state_event(Pid,
+                get_all_monitors))),
     ok = gen_fsm:sync_send_all_state_event(Pid, stop).
 
 pool_overflow() ->
@@ -113,6 +118,8 @@ pool_overflow() ->
                 get_avail_workers))),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
                 get_all_workers))),
+    ?assertEqual(0, length(gen_fsm:sync_send_all_state_event(Pid,
+                get_all_monitors))),
     ok = gen_fsm:sync_send_all_state_event(Pid, stop).
 
 pool_empty() ->
@@ -167,6 +174,8 @@ pool_empty() ->
                 get_avail_workers))),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
                 get_all_workers))),
+    ?assertEqual(0, length(gen_fsm:sync_send_all_state_event(Pid,
+                get_all_monitors))),
     ok = gen_fsm:sync_send_all_state_event(Pid, stop).
 
 pool_empty_no_overflow() ->
@@ -215,6 +224,8 @@ pool_empty_no_overflow() ->
                 get_avail_workers))),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
                 get_all_workers))),
+    ?assertEqual(0, length(gen_fsm:sync_send_all_state_event(Pid,
+                get_all_monitors))),
     ok = gen_fsm:sync_send_all_state_event(Pid, stop).
 
 
@@ -244,6 +255,8 @@ worker_death() ->
                 get_avail_workers))),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
                 get_all_workers))),
+    ?assertEqual(4, length(gen_fsm:sync_send_all_state_event(Pid,
+                get_all_monitors))),
     ok = gen_fsm:sync_send_all_state_event(Pid, stop).
 
 worker_death_while_full() ->
@@ -287,6 +300,8 @@ worker_death_while_full() ->
                 get_avail_workers))),
     ?assertEqual(6, length(gen_fsm:sync_send_all_state_event(Pid,
                 get_all_workers))),
+    ?assertEqual(6, length(gen_fsm:sync_send_all_state_event(Pid,
+                get_all_monitors))),
     ok = gen_fsm:sync_send_all_state_event(Pid, stop).
 
 
@@ -335,6 +350,8 @@ worker_death_while_full_no_overflow() ->
                 get_avail_workers))),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
                 get_all_workers))),
+    ?assertEqual(3, length(gen_fsm:sync_send_all_state_event(Pid,
+                get_all_monitors))),
 
     ok = gen_fsm:sync_send_all_state_event(Pid, stop).
 
@@ -354,6 +371,8 @@ pool_full_nonblocking_no_overflow() ->
     A = hd(Workers),
     checkin_worker(Pid, A),
     ?assertEqual(A, poolboy:checkout(Pid)),
+    ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
+                get_all_monitors))),
     ok = gen_fsm:sync_send_all_state_event(Pid, stop).
 
 pool_full_nonblocking() ->
@@ -374,7 +393,31 @@ pool_full_nonblocking() ->
     ?assertEqual(false, is_process_alive(A)), %% overflow workers get shut down
     ?assert(is_pid(NewWorker)),
     ?assertEqual(full, poolboy:checkout(Pid)),
+    ?assertEqual(10, length(gen_fsm:sync_send_all_state_event(Pid,
+                get_all_monitors))),
     ok = gen_fsm:sync_send_all_state_event(Pid, stop).
+
+user_death() ->
+    %% check that a dead user (a process that died with a worker checked out)
+    %% causes the pool to dismiss the worker and prune the state space.
+    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}},
+            {worker_module, poolboy_test_worker},
+            {size, 5}, {max_overflow, 5}, {checkout_blocks, false}]),
+    spawn(fun() ->
+                  %% you'll have to pry it from my cold, dead hands
+                  poolboy:checkout(Pid),
+                  receive after 500 -> exit(normal) end
+          end),
+    %% on a long enough timeline, the survival rate for everyone drops to zero.
+    receive after 1000 -> ok end,
+    ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
+                get_avail_workers))),
+    ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
+                get_all_workers))),
+    ?assertEqual(0, length(gen_fsm:sync_send_all_state_event(Pid,
+                get_all_monitors))),
+    ok = gen_fsm:sync_send_all_state_event(Pid, stop).
+    
 
 -endif.
 
