@@ -154,5 +154,5 @@ Authors
 License
 -------
 Poolboy is available in the public domain (see `UNLICENSE`).
-Poolboy is also available under the Apache License (see `LICENSE`), meant
-especially for jurisdictions that do not recognize public domain works.
+Poolboy is also optionally available under the Apache License (see `LICENSE`),
+meant especially for jurisdictions that do not recognize public domain works.

@@ -1,51 +1,49 @@
 -module(poolboy_tests).
 
--ifdef(TEST).
 -include_lib("eunit/include/eunit.hrl").
 
 pool_test_() ->
     {foreach,
         fun() ->
-                error_logger:tty(false)
+            error_logger:tty(false)
         end,
         fun(_) ->
-                case whereis(poolboy_test) of
-                    undefined -> ok;
-                    Pid -> gen_fsm:sync_send_all_state_event(Pid, stop)
-                end,
-                error_logger:tty(true)
+            case whereis(poolboy_test) of
+                undefined -> ok;
+                Pid -> gen_fsm:sync_send_all_state_event(Pid, stop)
+            end,
+            error_logger:tty(true)
         end,
         [
-            {"Basic pool operations",
+            {<<"Basic pool operations">>,
                 fun pool_startup/0
             },
-            {"Pool overflow should work",
+            {<<"Pool overflow should work">>,
                 fun pool_overflow/0
             },
-            {"Pool behaves right when it's empty",
+            {<<"Pool behaves when empty">>,
                 fun pool_empty/0
             },
-            {"Pool behaves right when it's empty and oveflow is disabled",
+            {<<"Pool behaves when empty and oveflow is disabled">>,
                 fun pool_empty_no_overflow/0
             },
-            {"Pool behaves right on worker death",
+            {<<"Pool behaves on worker death">>,
                 fun worker_death/0
             },
-            {"Pool behaves right when it's full and a worker dies",
+            {<<"Pool behaves when full and a worker dies">>,
                 fun worker_death_while_full/0
             },
-            {"Pool behaves right when it's full, a worker dies and overflow is disabled",
+            {<<"Pool behaves when full, a worker dies and overflow disabled">>,
                 fun worker_death_while_full_no_overflow/0
             },
-            {"Non-blocking pool behaves when it's full and overflow is disabled",
+            {<<"Non-blocking pool behaves when full and overflow disabled">>,
                 fun pool_full_nonblocking_no_overflow/0
             },
-            {"Non-blocking pool behaves when it's full",
+            {<<"Non-blocking pool behaves when full">>,
                 fun pool_full_nonblocking/0
             }
         ]
     }.
-
 
 %% tell a worker to exit and await its impending doom
 kill_worker(Pid) ->
@@ -65,73 +63,76 @@ checkin_worker(Pid, Worker) ->
 
 pool_startup() ->
     %% check basic pool operation
-    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}}, {worker_module, poolboy_test_worker},
-            {size, 10}, {max_overflow, 5}]),
+    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}},
+                                    {worker_module, poolboy_test_worker},
+                                    {size, 10}, {max_overflow, 5}]),
     ?assertEqual(10, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     poolboy:checkout(Pid),
     ?assertEqual(9, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     Worker = poolboy:checkout(Pid),
     ?assertEqual(8, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     checkin_worker(Pid, Worker),
     ?assertEqual(9, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     ok = gen_fsm:sync_send_all_state_event(Pid, stop).
 
 pool_overflow() ->
     %% check that the pool overflows properly
-    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}}, {worker_module, poolboy_test_worker},
-            {size, 5}, {max_overflow, 5}]),
+    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}},
+                                    {worker_module, poolboy_test_worker},
+                                    {size, 5}, {max_overflow, 5}]),
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 6)],
     ?assertEqual(0, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     ?assertEqual(7, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_all_workers))),
+                 get_all_workers))),
     [A, B, C, D, E, F, G] = Workers,
     checkin_worker(Pid, A),
     checkin_worker(Pid, B),
     ?assertEqual(0, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_all_workers))),
+                 get_all_workers))),
     checkin_worker(Pid, C),
     checkin_worker(Pid, D),
     ?assertEqual(2, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_all_workers))),
+                 get_all_workers))),
     checkin_worker(Pid, E),
     checkin_worker(Pid, F),
     ?assertEqual(4, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_all_workers))),
+                 get_all_workers))),
     checkin_worker(Pid, G),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_all_workers))),
+                 get_all_workers))),
     ok = gen_fsm:sync_send_all_state_event(Pid, stop).
 
 pool_empty() ->
     %% checks the pool handles the empty condition correctly when overflow is
     %% enabled.
-    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}}, {worker_module, poolboy_test_worker},
-            {size, 5}, {max_overflow, 2}]),
+    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}},
+                                    {worker_module, poolboy_test_worker},
+                                    {size, 5}, {max_overflow, 2}]),
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 6)],
     ?assertEqual(0, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     ?assertEqual(7, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_all_workers))),
+                 get_all_workers))),
     [A, B, C, D, E, F, G] = Workers,
     Self = self(),
     spawn(fun() ->
-                Worker = poolboy:checkout(Pid),
-                Self ! got_worker,
-                checkin_worker(Pid, Worker)
-        end),
+        Worker = poolboy:checkout(Pid),
+        Self ! got_worker,
+        checkin_worker(Pid, Worker)
+    end),
     %% spawned process should block waiting for worker to be available
     receive
         got_worker -> ?assert(false)
@@ -147,45 +148,46 @@ pool_empty() ->
         500 -> ?assert(false)
     end,
     ?assertEqual(0, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_all_workers))),
+                 get_all_workers))),
     checkin_worker(Pid, C),
     checkin_worker(Pid, D),
     ?assertEqual(2, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_all_workers))),
+                 get_all_workers))),
     checkin_worker(Pid, E),
     checkin_worker(Pid, F),
     ?assertEqual(4, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_all_workers))),
+                 get_all_workers))),
     checkin_worker(Pid, G),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_all_workers))),
+                 get_all_workers))),
     ok = gen_fsm:sync_send_all_state_event(Pid, stop).
 
 pool_empty_no_overflow() ->
     %% checks the pool handles the empty condition properly when overflow is
     %% disabled
-    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}}, {worker_module, poolboy_test_worker},
-            {size, 5}, {max_overflow, 0}]),
+    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}},
+                                    {worker_module, poolboy_test_worker},
+                                    {size, 5}, {max_overflow, 0}]),
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 4)],
     ?assertEqual(0, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_all_workers))),
+                 get_all_workers))),
     [A, B, C, D, E] = Workers,
     Self = self(),
     spawn(fun() ->
-                Worker = poolboy:checkout(Pid),
-                Self ! got_worker,
-                checkin_worker(Pid, Worker)
-        end),
+        Worker = poolboy:checkout(Pid),
+        Self ! got_worker,
+        checkin_worker(Pid, Worker)
+    end),
     %% spawned process should block waiting for worker to be available
     receive
         got_worker -> ?assert(false)
@@ -201,74 +203,75 @@ pool_empty_no_overflow() ->
         500 -> ?assert(false)
     end,
     ?assertEqual(2, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_all_workers))),
+                 get_all_workers))),
     checkin_worker(Pid, C),
     checkin_worker(Pid, D),
     ?assertEqual(4, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_all_workers))),
+                 get_all_workers))),
     checkin_worker(Pid, E),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_all_workers))),
+                 get_all_workers))),
     ok = gen_fsm:sync_send_all_state_event(Pid, stop).
-
 
 worker_death() ->
     %% this test checks that dead workers are only restarted when the pool is
     %% not full if the overflow count is 0. Meaning, don't restart overflow
     %% workers.
-    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}}, {worker_module, poolboy_test_worker},
-            {size, 5}, {max_overflow, 2}]),
+    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}},
+                                    {worker_module, poolboy_test_worker},
+                                    {size, 5}, {max_overflow, 2}]),
     Worker = poolboy:checkout(Pid),
     kill_worker(Worker),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     [A, B, C|_Workers] = [poolboy:checkout(Pid) || _ <- lists:seq(0, 6)],
     ?assertEqual(0, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     ?assertEqual(7, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_all_workers))),
+                 get_all_workers))),
     kill_worker(A),
     ?assertEqual(0, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     ?assertEqual(6, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_all_workers))),
+                 get_all_workers))),
     kill_worker(B),
     kill_worker(C),
     ?assertEqual(1, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_all_workers))),
+                 get_all_workers))),
     ok = gen_fsm:sync_send_all_state_event(Pid, stop).
 
 worker_death_while_full() ->
     %% this test checks that if a worker dies while the pool is full and there
     %% is a queued checkout, a new worker is started and the checkout
     %serviced. If there are no queued checkouts, a new worker is not started.
-    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}}, {worker_module, poolboy_test_worker},
-            {size, 5}, {max_overflow, 2}]),
+    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}},
+                                    {worker_module, poolboy_test_worker},
+                                    {size, 5}, {max_overflow, 2}]),
     Worker = poolboy:checkout(Pid),
     kill_worker(Worker),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     [A, B|_Workers] = [poolboy:checkout(Pid) || _ <- lists:seq(0, 6)],
     ?assertEqual(0, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     ?assertEqual(7, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_all_workers))),
+                 get_all_workers))),
     Self = self(),
     spawn(fun() ->
-                poolboy:checkout(Pid),
-                Self ! got_worker
-                %% XXX don't release the worker. we want to also test
-                %% what happens when the worker pool is full and a worker
-                %% dies with no queued checkouts.
-        end),
+        poolboy:checkout(Pid),
+        Self ! got_worker
+        %% XXX don't release the worker. we want to also test
+        %% what happens when the worker pool is full and a worker
+        %% dies with no queued checkouts.
+    end),
     %% spawned process should block waiting for worker to be available
     receive
         got_worker -> ?assert(false)
@@ -284,9 +287,9 @@ worker_death_while_full() ->
     end,
     kill_worker(B),
     ?assertEqual(0, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     ?assertEqual(6, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_all_workers))),
+                 get_all_workers))),
     ok = gen_fsm:sync_send_all_state_event(Pid, stop).
 
 
@@ -294,24 +297,25 @@ worker_death_while_full_no_overflow() ->
     %% this test tests that if a worker dies while the pool is full AND
     %% there's no overflow, a new worker is started unconditionally and any
     %% queued checkouts are serviced
-    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}}, {worker_module, poolboy_test_worker},
-            {size, 5}, {max_overflow, 0}]),
+    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}},
+                                    {worker_module, poolboy_test_worker},
+                                    {size, 5}, {max_overflow, 0}]),
     Worker = poolboy:checkout(Pid),
     kill_worker(Worker),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     [A, B, C|_Workers] = [poolboy:checkout(Pid) || _ <- lists:seq(0, 4)],
     ?assertEqual(0, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_all_workers))),
+                 get_all_workers))),
     Self = self(),
     spawn(fun() ->
-                poolboy:checkout(Pid),
-                Self ! got_worker
-                %% XXX do not release, need to also test when worker dies
-                %% and no checkouts queued
-        end),
+        poolboy:checkout(Pid),
+        Self ! got_worker
+        %% XXX do not release, need to also test when worker dies
+        %% and no checkouts queued
+    end),
     %% spawned process should block waiting for worker to be available
     receive
         got_worker -> ?assert(false)
@@ -327,14 +331,14 @@ worker_death_while_full_no_overflow() ->
     end,
     kill_worker(B),
     ?assertEqual(1, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_all_workers))),
+                 get_all_workers))),
     kill_worker(C),
     ?assertEqual(2, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_all_workers))),
+                 get_all_workers))),
 
     ok = gen_fsm:sync_send_all_state_event(Pid, stop).
 
@@ -342,15 +346,15 @@ pool_full_nonblocking_no_overflow() ->
     %% check that when the pool is full, checkouts return 'full' when the
     %% option to checkouts nonblocking is enabled.
     {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}},
-            {worker_module, poolboy_test_worker},
-            {size, 5}, {max_overflow, 0}, {checkout_blocks, false}]),
+                                    {worker_module, poolboy_test_worker},
+                                    {size, 5}, {max_overflow, 0}]),
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 4)],
     ?assertEqual(0, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     ?assertEqual(5, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_all_workers))),
-    ?assertEqual(full, poolboy:checkout(Pid)),
-    ?assertEqual(full, poolboy:checkout(Pid)),
+                 get_all_workers))),
+    ?assertEqual(full, poolboy:checkout(Pid, false)),
+    ?assertEqual(full, poolboy:checkout(Pid, false)),
     A = hd(Workers),
     checkin_worker(Pid, A),
     ?assertEqual(A, poolboy:checkout(Pid)),
@@ -360,21 +364,18 @@ pool_full_nonblocking() ->
     %% check that when the pool is full, checkouts return 'full' when the
     %% option to checkouts nonblocking is enabled.
     {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}},
-            {worker_module, poolboy_test_worker},
-            {size, 5}, {max_overflow, 5}, {checkout_blocks, false}]),
+                                    {worker_module, poolboy_test_worker},
+                                    {size, 5}, {max_overflow, 5}]),
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 9)],
     ?assertEqual(0, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_avail_workers))),
+                 get_avail_workers))),
     ?assertEqual(10, length(gen_fsm:sync_send_all_state_event(Pid,
-                get_all_workers))),
-    ?assertEqual(full, poolboy:checkout(Pid)),
+                 get_all_workers))),
+    ?assertEqual(full, poolboy:checkout(Pid, false)),
     A = hd(Workers),
     checkin_worker(Pid, A),
     NewWorker = poolboy:checkout(Pid),
     ?assertEqual(false, is_process_alive(A)), %% overflow workers get shut down
     ?assert(is_pid(NewWorker)),
-    ?assertEqual(full, poolboy:checkout(Pid)),
+    ?assertEqual(full, poolboy:checkout(Pid, false)),
     ok = gen_fsm:sync_send_all_state_event(Pid, stop).
-
--endif.
-
