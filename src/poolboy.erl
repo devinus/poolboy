@@ -15,10 +15,11 @@ checkin(Pool, Worker) ->
     gen_fsm:send_event(Pool, {checkin, Worker}).
 
 checkout(Pool) ->
+<<<<<<< HEAD
     checkout(Pool, true).
 
 checkout(Pool, Block) ->
-    gen_fsm:sync_send_event(Pool, {checkout, Block}).
+    gen_fsm:sync_send_event(Pool, {checkout, Block}, infinity).
 
 start_link(Args) ->
     case proplists:get_value(name, Args) of
@@ -143,6 +144,7 @@ full(_Event, _From, State) ->
     {reply, ok, full, State}.
 
 handle_event(_Event, StateName, State) ->
+<<<<<<< HEAD
     {next_state, StateName, State}.
 
 handle_sync_event(get_avail_workers, _From, StateName,
@@ -153,6 +155,19 @@ handle_sync_event(get_all_workers, _From, StateName,
     {reply, supervisor:which_children(Sup), StateName, State};
 handle_sync_event(stop, _From, _StateName, State) ->
     {stop, normal, ok, State};
+=======
+  {next_state, StateName, State}.
+
+handle_sync_event(get_avail_workers, _From, StateName, #state{workers=Workers}=State) ->
+  WorkerList = queue:to_list(Workers),
+  {reply, WorkerList, StateName, State};
+handle_sync_event(get_all_workers, _From, StateName, #state{worker_sup=Sup}=State) ->
+  WorkerList = supervisor:which_children(Sup),
+  {reply, WorkerList, StateName, State};
+handle_sync_event(stop, _From, _StateName, #state{worker_sup=Sup}=State) ->
+  exit(Sup, shutdown),
+  {stop, normal, ok, State};
+>>>>>>> niksite/master
 handle_sync_event(_Event, _From, StateName, State) ->
     Reply = {error, invalid_message},
     {reply, Reply, StateName, State}.
