@@ -49,7 +49,7 @@ ready({checkin, Pid}, State) ->
     Workers = queue:in(Pid, State#state.workers),
     Monitors = case lists:keytake(Pid, 1, State#state.monitors) of
         {value, {_, Ref}, Left} -> erlang:demonitor(Ref), Left;
-        false -> []
+        false -> State#state.monitors
     end,
     {next_state, ready, State#state{workers=Workers, monitors=Monitors}};
 ready(_Event, State) ->
@@ -83,10 +83,18 @@ ready(_Event, _From, State) ->
 
 overflow({checkin, Pid}, #state{overflow=1}=State) ->
     dismiss_worker(Pid),
-    {next_state, ready, State#state{overflow=0}};
+    Monitors = case lists:keytake(Pid, 1, State#state.monitors) of
+        {value, {_, Ref}, Left} -> erlang:demonitor(Ref), Left;
+        false -> []
+    end,
+    {next_state, ready, State#state{overflow=0, monitors=Monitors}};
 overflow({checkin, Pid}, #state{overflow=Overflow}=State) ->
     dismiss_worker(Pid),
-    {next_state, overflow, State#state{overflow=Overflow-1}};
+    Monitors = case lists:keytake(Pid, 1, State#state.monitors) of
+        {value, {_, Ref}, Left} -> erlang:demonitor(Ref), Left;
+        false -> State#state.monitors
+    end,
+    {next_state, overflow, State#state{overflow=Overflow-1, monitors=Monitors}};
 overflow(_Event, State) ->
     {next_state, overflow, State}.
 
@@ -111,25 +119,25 @@ overflow(_Event, _From, State) ->
 
 full({checkin, Pid}, #state{waiting=Waiting, max_overflow=MaxOverflow,
                             overflow=Overflow}=State) ->
+    Monitors = case lists:keytake(Pid, 1, State#state.monitors) of
+        {value, {_, Ref0}, Left0} -> erlang:demonitor(Ref0), Left0;
+        false -> State#state.monitors
+    end,
     case queue:out(Waiting) of
         {{value, {FromPid, _}=From}, Left} ->
             Ref = erlang:monitor(process, FromPid),
-            Monitors = [{Pid, Ref} | State#state.monitors],
+            Monitors1 = [{Pid, Ref} | Monitors],
             gen_fsm:reply(From, Pid),
             {next_state, full, State#state{waiting=Left,
-                                           monitors=Monitors}};
+                                           monitors=Monitors1}};
         {empty, Empty} when MaxOverflow < 1 ->
             Workers = queue:in(Pid, State#state.workers),
-            Monitors = case lists:keytake(Pid, 1, State#state.monitors) of
-                {value, {_, Ref}, Left} -> erlang:demonitor(Ref), Left;
-                false -> []
-            end,
-            {next_state, ready, State#state{workers=Workers,
-                                            waiting=Empty,
+            {next_state, ready, State#state{workers=Workers, waiting=Empty,
                                             monitors=Monitors}};
         {empty, Empty} ->
             dismiss_worker(Pid),
             {next_state, overflow, State#state{waiting=Empty,
+                                               monitors=Monitors,
                                                overflow=Overflow-1}}
     end;
 full(_Event, State) ->
@@ -147,10 +155,15 @@ handle_event(_Event, StateName, State) ->
 
 handle_sync_event(get_avail_workers, _From, StateName,
                   #state{workers=Workers}=State) ->
-    {reply, queue:to_list(Workers), StateName, State};
+    WorkerList = queue:to_list(Workers),
+    {reply, WorkerList, StateName, State};
 handle_sync_event(get_all_workers, _From, StateName,
                   #state{worker_sup=Sup}=State) ->
-    {reply, supervisor:which_children(Sup), StateName, State};
+    WorkerList = supervisor:which_children(Sup),
+    {reply, WorkerList, StateName, State};
+handle_sync_event(get_all_monitors, _From, StateName,
+                  #state{monitors=Monitors}=State) ->
+    {reply, Monitors, StateName, State};
 handle_sync_event(stop, _From, _StateName, #state{worker_sup=Sup}=State) ->
     exit(Sup, shutdown),
     {stop, normal, ok, State};
@@ -159,11 +172,13 @@ handle_sync_event(_Event, _From, StateName, State) ->
     {reply, Reply, StateName, State}.
 
 handle_info({'DOWN', Ref, _, _, _}, StateName, State) ->
-    case lists:keytake(Ref, 2, State#state.monitors) of
-        {value, {Pid, _}, _} -> dismiss_worker(Pid);
-        false -> false
-    end,
-    {next_state, StateName, State};
+    case lists:keyfind(Ref, 2, State#state.monitors) of
+        {Pid, Ref} ->
+            exit(Pid, kill),
+            {next_state, StateName, State};
+        false ->
+            {next_state, StateName, State}
+    end;
 handle_info({'EXIT', Pid, _}, StateName, #state{worker_sup=Sup,
                                                 overflow=Overflow,
                                                 waiting=Waiting,
