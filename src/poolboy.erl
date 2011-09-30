@@ -3,22 +3,27 @@
 -module(poolboy).
 -behaviour(gen_fsm).
 
--export([start_link/1, checkout/1, checkout/2, checkin/2]).
+-export([start_link/1, checkout/1, checkout/2, checkout/3, checkin/2]).
 -export([init/1, ready/2, ready/3, overflow/2, overflow/3, full/2, full/3,
          handle_event/3, handle_sync_event/4, handle_info/3, terminate/3,
          code_change/4]).
 
+-define(TIMEOUT, 5000).
+
 -record(state, {workers, worker_sup, waiting=queue:new(), monitors=[],
                 size=5, overflow=0, max_overflow=10}).
 
-checkin(Pool, Worker) ->
-    gen_fsm:send_event(Pool, {checkin, Worker}).
-
 checkout(Pool) ->
-    checkout(Pool, true).
+    checkout(Pool, true, ?TIMEOUT).
 
 checkout(Pool, Block) ->
-    gen_fsm:sync_send_event(Pool, {checkout, Block}, infinity).
+    checkout(Pool, Block, ?TIMEOUT).
+
+checkout(Pool, Block, Timeout) ->
+    gen_fsm:sync_send_event(Pool, {checkout, Block}, Timeout).
+
+checkin(Pool, Worker) ->
+    gen_fsm:send_event(Pool, {checkin, Worker}).
 
 start_link(Args) ->
     case proplists:get_value(name, Args) of
