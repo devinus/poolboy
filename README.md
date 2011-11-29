@@ -72,7 +72,7 @@ init([]) ->
         {PoolName, {poolboy, start_link, [Args]},
                     permanent, 5000, worker, [poolboy]}
     end, Pools),
-    {ok, {{one_for_all, 10, 10}, PoolSpecs}}.
+    {ok, {{one_for_one, 10, 10}, PoolSpecs}}.
 
 squery(PoolName, Sql) ->
     Worker = poolboy:checkout(PoolName),
