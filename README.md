@@ -147,9 +147,9 @@ Options
 
 Authors
 -------
-- Devin Torres (devinus) <devin@devintorres.com>
-- Kurt Williams (onkel-dirtus) <kurt.r.williams@gmail.com>
-- Andrew Thompson (Vagabond) <andrew@hijacked.us>
+- Devin Torres (@devinus) <devin@devintorres.com>
+- Kurt Williams (@onkel-dirtus) <kurt.r.williams@gmail.com>
+- Andrew Thompson (@Vagabond) <andrew@hijacked.us>
 
 License
 -------
