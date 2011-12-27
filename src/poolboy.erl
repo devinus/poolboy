@@ -28,7 +28,7 @@
 checkout(Pool) ->
     checkout(Pool, true).
 
--spec checkout(Pool :: node(), true) -> pid() | full.
+-spec checkout(Pool :: node(), boolean()) -> pid() | full.
 checkout(Pool, Block) ->
     checkout(Pool, Block, ?TIMEOUT).
 
