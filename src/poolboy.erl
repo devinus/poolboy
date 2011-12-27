@@ -12,19 +12,32 @@
 -define(DEFAULT_INIT_FUN, fun(Worker) -> {ok, Worker} end).
 -define(DEFAULT_STOP_FUN, fun(Worker) -> Worker ! stop end).
 
--record(state, {workers, worker_sup, waiting=queue:new(), monitors=[],
-                size=5, overflow=0, max_overflow=10, worker_init=?DEFAULT_INIT_FUN,
-                worker_stop=?DEFAULT_STOP_FUN}).
+-record(state, {
+    workers :: queue(),
+    worker_sup :: pid(),
+    waiting = queue:new() :: queue(),
+    monitors = [] :: list(),
+    size = 5 :: non_neg_integer(),
+    overflow = 0 :: non_neg_integer(),
+    max_overflow = 10 :: non_neg_integer(),
+    worker_init = ?DEFAULT_INIT_FUN :: fun(),
+    worker_stop = ?DEFAULT_STOP_FUN :: fun()
+}).
 
+-spec checkout(Pool :: node()) -> pid().
 checkout(Pool) ->
-    checkout(Pool, true, ?TIMEOUT).
+    checkout(Pool, true).
 
+-spec checkout(Pool :: node(), true) -> pid() | full.
 checkout(Pool, Block) ->
     checkout(Pool, Block, ?TIMEOUT).
 
+-spec checkout(Pool :: node(), Block :: boolean(), Timeout :: timeout())
+    -> pid() | full.
 checkout(Pool, Block, Timeout) ->
     gen_fsm:sync_send_event(Pool, {checkout, Block}, Timeout).
 
+-spec checkin(Pool :: node(), Worker :: pid()) -> 'ok'.
 checkin(Pool, Worker) ->
     gen_fsm:send_event(Pool, {checkin, Worker}).
 
@@ -38,22 +51,22 @@ start_link(Args) ->
 
 init(Args) ->
     process_flag(trap_exit, true),
-    init(Args, Args, #state{}).
+    init(Args, #state{}).
 
-init([{worker_module, Mod} | Rest], AllArgs, State) ->
+init([{worker_module, Mod} | Rest], State) ->
     {ok, Sup} = poolboy_sup:start_link(Mod, Rest),
-    init(Rest, AllArgs, State#state{worker_sup=Sup});
-init([{size, PoolSize} | Rest], AllArgs, State) ->
-    init(Rest, AllArgs, State#state{size=PoolSize});
-init([{max_overflow, MaxOverflow} | Rest], AllArgs, State) ->
-    init(Rest, AllArgs, State#state{max_overflow=MaxOverflow});
-init([{init_fun, InitFun} | Rest], AllArgs, State) when is_function(InitFun) ->
-    init(Rest, AllArgs, State#state{worker_init=InitFun});
-init([{stop_fun, StopFun} | Rest], AllArgs, State) when is_function(StopFun) ->
-    init(Rest, AllArgs, State#state{worker_stop=StopFun});
-init([_ | Rest], AllArgs, State) ->
-    init(Rest, AllArgs, State);
-init([], _AllArgs, #state{size=Size, worker_sup=Sup, worker_init=InitFun}=State) ->
+    init(Rest, State#state{worker_sup=Sup});
+init([{size, Size} | Rest], State) ->
+    init(Rest, State#state{size=Size});
+init([{max_overflow, MaxOverflow} | Rest], State) ->
+    init(Rest, State#state{max_overflow=MaxOverflow});
+init([{init_fun, InitFun} | Rest], State) when is_function(InitFun) ->
+    init(Rest, State#state{worker_init=InitFun});
+init([{stop_fun, StopFun} | Rest], State) when is_function(StopFun) ->
+    init(Rest, State#state{worker_stop=StopFun});
+init([_ | Rest], State) ->
+    init(Rest, State);
+init([], #state{size=Size, worker_sup=Sup, worker_init=InitFun}=State) ->
     Workers = prepopulate(Size, Sup, InitFun),
     {ok, ready, State#state{workers=Workers}}.
 

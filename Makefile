@@ -22,4 +22,5 @@ build-plt:
 	    --apps kernel stdlib
 
 dialyze: compile
-	@$(DIALYZER) --src src --plt .dialyzer_plt $(DIALYZER_WARNINGS)
+	@$(DIALYZER) --src src --plt .dialyzer_plt $(DIALYZER_WARNINGS) | \
+	    fgrep -vf .dialyzer-ignore-warnings
