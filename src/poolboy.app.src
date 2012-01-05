@@ -1,5 +1,6 @@
 {application, poolboy, [
     {description, "A hunky Erlang worker pool factory"},
-    {vsn, "0.3.1"},
-    {applications, [kernel, stdlib]}
+    {vsn, "0.5"},
+    {applications, [kernel, stdlib]},
+    {registered, []}
 ]}.

@@ -27,7 +27,7 @@ Example Application
     {env, [
         {pools, [
             {pool1, [
-                {pool_size, 10},
+                {size, 10},
                 {max_overflow, 20},
                 {hostname, "127.0.0.1"},
                 {database, "db1"},
@@ -35,7 +35,7 @@ Example Application
                 {password, "abc123"}
             ]},
             {pool2, [
-                {pool_size, 5},
+                {size, 5},
                 {max_overflow, 10},
                 {hostname, "127.0.0.1"},
                 {database, "db2"},
@@ -72,7 +72,7 @@ init([]) ->
         {PoolName, {poolboy, start_link, [Args]},
                     permanent, 5000, worker, [poolboy]}
     end, Pools),
-    {ok, {{one_for_all, 10, 10}, PoolSpecs}}.
+    {ok, {{one_for_one, 10, 10}, PoolSpecs}}.
 
 squery(PoolName, Sql) ->
     Worker = poolboy:checkout(PoolName),
@@ -154,5 +154,5 @@ Authors
 License
 -------
 Poolboy is available in the public domain (see `UNLICENSE`).
-Poolboy is also available under the Apache License (see `LICENSE`), meant
-especially for jurisdictions that do not recognize public domain works.
+Poolboy is also optionally available under the Apache License (see `LICENSE`),
+meant especially for jurisdictions that do not recognize public domain works.
