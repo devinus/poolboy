@@ -31,6 +31,8 @@ command(S) ->
 		[{call, ?MODULE, start_poolboy, make_args(S, nat(), nat())} || S#state.pid == undefined] ++
 			[{call, ?MODULE, stop_poolboy, [S#state.pid]} || S#state.pid /= undefined] ++
 			[{call, ?MODULE, checkout_nonblock, [S#state.pid]} || S#state.pid /= undefined] ++
+			%% checkout shrinks to checkout_nonblock so we can simplify counterexamples
+			[{call, ?MODULE, ?SHRINK(checkout_block, [checkout_nonblock]), [S#state.pid]} || S#state.pid /= undefined] ++
 			[{call, ?MODULE, checkin, [S#state.pid, elements(S#state.checked_out)]} || S#state.pid /= undefined, S#state.checked_out /= []]
 	).
 
@@ -48,6 +50,9 @@ stop_poolboy(Pid) ->
 checkout_nonblock(Pool) ->
 	poolboy:checkout(Pool, false).
 
+checkout_block(Pool) ->
+	catch(poolboy:checkout(Pool, true, 100)).
+
 checkin(Pool, Worker) ->
 	Res = poolboy:checkin(Pool, Worker),
 	gen_fsm:sync_send_all_state_event(Pool, get_avail_workers),
@@ -64,6 +69,13 @@ precondition(S, {call, _, checkin, [_Pool, Pid]}) ->
 precondition(_S,{call,_,_,_}) ->
 	true.
 
+postcondition(S,{call,_,checkout_block,[_Pool]},R) ->
+	case R of
+		{'EXIT', {timeout, _}} ->
+			length(S#state.checked_out) >= S#state.size + S#state.max_overflow;
+		_ ->
+			length(S#state.checked_out) < S#state.size + S#state.max_overflow
+	end;
 postcondition(S,{call,_,checkout_nonblock,[_Pool]},R) ->
 	case R of
 		full ->
@@ -83,7 +95,16 @@ next_state(S,V,{call,_,start_poolboy, [Args]}) ->
 	};
 next_state(S,_V,{call,_,stop_poolboy, [_Args]}) ->
 	S#state{pid=undefined, checked_out=[]}; 
-next_state(S,V,{call,_,checkout_nonblock, _}) ->
+next_state(S,V,{call,_,checkout_block,_}) ->
+	%% if the model says the checkout worked, store the result
+	case checkout_ok(S) of
+		false ->
+			S;
+		_ ->
+			S#state{checked_out=S#state.checked_out++[V]}
+	end;
+next_state(S,V,{call,_,checkout_nonblock,_}) ->
+	%% if the model says the checkout worked, store the result
 	case checkout_ok(S) of
 		false ->
 			S;
