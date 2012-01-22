@@ -9,9 +9,9 @@
 -include_lib("eunit/include/eunit.hrl").
 
 poolboy_test_() ->
-	{timeout, 30,
+	{timeout, 300,
 		fun() ->
-				?assert(eqc:quickcheck(eqc:testing_time(29, poolboy_eqc:prop_sequential())))
+				?assert(eqc:quickcheck(eqc:testing_time(290, poolboy_eqc:prop_parallel())))
 		end
 	}.
 
@@ -43,9 +43,9 @@ make_args(_S, Size, Overflow) ->
 	[[{size, Size}, {max_overflow, Overflow}, {worker_module, poolboy_test_worker}, {name, {local, poolboy_eqc}}]].
 
 spawn_process() ->
-	spawn(fun() ->
+	{spawn(fun() ->
 				timer:sleep(5000)
-		end).
+		end), self()}.
 
 spawn_linked_process(Pool) ->
 	Parent = self(),
@@ -68,17 +68,17 @@ stop_poolboy(Pid) ->
 	timer:sleep(1).
 
 checkout_nonblock(Pool) ->
-	poolboy:checkout(Pool, false).
+	{poolboy:checkout(Pool, false), self()}.
 
 checkout_block(Pool) ->
-	catch(poolboy:checkout(Pool, true, 100)).
+	{catch(poolboy:checkout(Pool, true, 100)), self()}.
 
-checkin(Pool, Worker) ->
+checkin(Pool, {Worker, _}) ->
 	Res = poolboy:checkin(Pool, Worker),
 	gen_fsm:sync_send_all_state_event(Pool, get_avail_workers),
 	Res.
 
-kill_worker(Worker) ->
+kill_worker({Worker, _}) ->
 	exit(Worker, kill),
 	timer:sleep(1).
 
@@ -87,7 +87,7 @@ kill_idle_worker(Pool) ->
 	case Pid of
 		_ when is_pid(Pid) ->
 			poolboy:checkin(Pool, Pid),
-			kill_worker(Pid);
+			kill_worker({Pid, self()});
 		_ ->
 			timer:sleep(1),
 			kill_idle_worker(Pool)
@@ -111,39 +111,39 @@ precondition(_S,{call,_,_,_}) ->
 	true.
 
 %% XXX comment out for parallel mode XXX
-dynamic_precondition(S = #state{pid=Pid},_) when Pid /= undefined ->
-	State = if length(S#state.checked_out) == S#state.size + S#state.max_overflow ->
-			full;
-		length(S#state.checked_out) >= S#state.size ->
-			overflow;
-		true ->
-			ready
-	end,
+%dynamic_precondition(S = #state{pid=Pid},_) when Pid /= undefined ->
+	%State = if length(S#state.checked_out) == S#state.size + S#state.max_overflow ->
+			%full;
+		%length(S#state.checked_out) >= S#state.size ->
+			%overflow;
+		%true ->
+			%ready
+	%end,
 
-	Workers = max(0, S#state.size - length(S#state.checked_out)),
-	OverFlow = max(0, length(S#state.checked_out) - S#state.size),
-	Monitors = length(S#state.checked_out),
+	%Workers = max(0, S#state.size - length(S#state.checked_out)),
+	%OverFlow = max(0, length(S#state.checked_out) - S#state.size),
+	%Monitors = length(S#state.checked_out),
 
-	RealStatus = gen_fsm:sync_send_all_state_event(Pid, status),
-	case RealStatus == {State, Workers, OverFlow, Monitors} of
-		true ->
-			true;
-		_ ->
-			exit({wrong_state, RealStatus, {State, Workers, OverFlow, Monitors}})
-	end;
-dynamic_precondition(_,_) ->
-	true.
+	%RealStatus = gen_fsm:sync_send_all_state_event(Pid, status),
+	%case RealStatus == {State, Workers, OverFlow, Monitors} of
+		%true ->
+			%true;
+		%_ ->
+			%exit({wrong_state, RealStatus, {State, Workers, OverFlow, Monitors}})
+	%end;
+%dynamic_precondition(_,_) ->
+	%true.
 
 postcondition(S,{call,_,checkout_block,[_Pool]},R) ->
 	case R of
-		{'EXIT', {timeout, _}} ->
+		{{'EXIT', {timeout, _}}, _} ->
 			length(S#state.checked_out) >= S#state.size + S#state.max_overflow;
 		_ ->
 			length(S#state.checked_out) < S#state.size + S#state.max_overflow
 	end;
 postcondition(S,{call,_,checkout_nonblock,[_Pool]},R) ->
 	case R of
-		full ->
+		{full, _} ->
 			length(S#state.checked_out) >= S#state.size + S#state.max_overflow;
 		_ ->
 			length(S#state.checked_out) < S#state.size + S#state.max_overflow
@@ -183,7 +183,11 @@ next_state(S,_V,{call, _, kill_worker, [Worker]}) ->
 next_state(S,_V,{call, _, kill_idle_worker, [_Pool]}) ->
 	S;
 next_state(S,_V,{call, _, spurious_exit, [_Pool]}) ->
-	S.
+	S;
+next_state(S,V,{call, erlang, self, []}) ->
+	%% added after test generation, values are never symbolic
+	S#state{checked_out=[{Worker, Pid} || {Worker, Pid} <- S#state.checked_out, Pid /= V]}.
+
 
 prop_sequential() ->
 	fault_rate(1, 10,
@@ -197,6 +201,21 @@ prop_sequential() ->
 									[H,S,Res, zip(tl(Cmds), [Y || {_, Y} <- H])]),
 								Res == ok)
 					end)))).
+
+prop_parallel() ->
+	fault_rate(1, 10,
+		?FORALL(Cmds={Seq,Par},parallel_commands(?MODULE),
+			?TRAPEXIT(
+				aggregate(command_names(Cmds), 
+					begin
+							NewPar = [P ++ [{set, {var, 0}, {call, erlang, self, []}}] || P <- Par],
+							{H,S,Res} = run_parallel_commands(?MODULE,{Seq,NewPar}),
+							catch(stop_poolboy(whereis(poolboy_eqc))),
+							?WHENFAIL(io:format("History: ~p\nState: ~p\nRes: ~p\n",
+									[H,S,Res]),
+								Res == ok)
+					end)))).
+
 
 checkout_ok(S) ->
 	length(S#state.checked_out) < S#state.size + S#state.max_overflow.
