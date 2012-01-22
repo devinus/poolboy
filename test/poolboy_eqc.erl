@@ -34,8 +34,8 @@ command(S) ->
 			%% checkout shrinks to checkout_nonblock so we can simplify counterexamples
 			[{call, ?MODULE, ?SHRINK(checkout_block, [checkout_nonblock]), [S#state.pid]} || S#state.pid /= undefined] ++
 			[{call, ?MODULE, checkin, [S#state.pid, elements(S#state.checked_out)]} || S#state.pid /= undefined, S#state.checked_out /= []] ++
-			[{call, ?MODULE, kill_worker, [elements(S#state.checked_out)]} || S#state.pid /= undefined, S#state.checked_out /= []
-			]
+			[{call, ?MODULE, kill_worker, [elements(S#state.checked_out)]} || S#state.pid /= undefined, S#state.checked_out /= []] ++
+			[{call, ?MODULE, kill_idle_worker, [S#state.pid]} || S#state.pid /= undefined]
 	).
 
 make_args(_S, Size, Overflow) ->
@@ -64,6 +64,17 @@ kill_worker(Worker) ->
 	exit(Worker, kill),
 	timer:sleep(1).
 
+kill_idle_worker(Pool) ->
+	Pid = poolboy:checkout(Pool, false),
+	case Pid of
+		_ when is_pid(Pid) ->
+			poolboy:checkin(Pool, Pid),
+			kill_worker(Pid);
+		_ ->
+			timer:sleep(1),
+			kill_idle_worker(Pool)
+	end.
+
 precondition(S,{call,_,start_poolboy,_}) ->
 	%% only start new pool when old one is stopped
   S#state.pid == undefined;
@@ -74,6 +85,8 @@ precondition(S, {call, _, checkin, [_Pool, Pid]}) ->
 	lists:member(Pid, S#state.checked_out);
 precondition(S, {call, _, kill_worker, [Pid]}) ->
 	lists:member(Pid, S#state.checked_out);
+precondition(S,{call,_,kill_idle_worker,[_Pool]}) ->
+	length(S#state.checked_out) < S#state.size;
 precondition(_S,{call,_,_,_}) ->
 	true.
 
@@ -89,13 +102,14 @@ dynamic_precondition(S = #state{pid=Pid},_) when Pid /= undefined ->
 
 	Workers = max(0, S#state.size - length(S#state.checked_out)),
 	OverFlow = max(0, length(S#state.checked_out) - S#state.size),
+	Monitors = length(S#state.checked_out),
 
 	RealStatus = gen_fsm:sync_send_all_state_event(Pid, status),
-	case RealStatus == {State, Workers, OverFlow} of
+	case RealStatus == {State, Workers, OverFlow, Monitors} of
 		true ->
 			true;
 		_ ->
-			exit({wrong_state, RealStatus, {State, Workers, OverFlow}})
+			exit({wrong_state, RealStatus, {State, Workers, OverFlow, Monitors}})
 	end;
 dynamic_precondition(_,_) ->
 	true.
@@ -145,9 +159,9 @@ next_state(S,V,{call,_,checkout_nonblock,_}) ->
 next_state(S,_V,{call, _, checkin, [_Pool, Worker]}) ->
 	S#state{checked_out=S#state.checked_out -- [Worker]};
 next_state(S,_V,{call, _, kill_worker, [Worker]}) ->
-	S#state{checked_out=S#state.checked_out -- [Worker]}.
-
-
+	S#state{checked_out=S#state.checked_out -- [Worker]};
+next_state(S,_V,{call, _, kill_idle_worker, [_Pool]}) ->
+	S.
 
 prop_sequential() ->
 		?FORALL(Cmds,commands(?MODULE),

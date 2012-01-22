@@ -231,7 +231,7 @@ handle_sync_event(stop, _From, _StateName,State) ->
     {stop, normal, ok, State};
 handle_sync_event(status, _From, StateName, State) ->
     {reply, {StateName, queue:len(State#state.workers),
-            State#state.overflow},
+            State#state.overflow, length(State#state.monitors)},
         StateName, State};
 handle_sync_event(_Event, _From, StateName, State) ->
     Reply = {error, invalid_message},
@@ -253,7 +253,7 @@ handle_info({'EXIT', Pid, _}, StateName, State) ->
            worker_init = InitFun} = State,
     Monitors = case lists:keytake(Pid, 1, State#state.monitors) of
         {value, {_, Ref}, Left} -> erlang:demonitor(Ref), Left;
-        false -> []
+        false -> State#state.monitors
     end,
     case StateName of
         ready ->
