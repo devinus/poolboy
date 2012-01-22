@@ -35,11 +35,24 @@ command(S) ->
 			[{call, ?MODULE, ?SHRINK(checkout_block, [checkout_nonblock]), [S#state.pid]} || S#state.pid /= undefined] ++
 			[{call, ?MODULE, checkin, [S#state.pid, elements(S#state.checked_out)]} || S#state.pid /= undefined, S#state.checked_out /= []] ++
 			[{call, ?MODULE, kill_worker, [elements(S#state.checked_out)]} || S#state.pid /= undefined, S#state.checked_out /= []] ++
-			[{call, ?MODULE, kill_idle_worker, [S#state.pid]} || S#state.pid /= undefined]
+			[{call, ?MODULE, kill_idle_worker, [S#state.pid]} || S#state.pid /= undefined] ++
+			[{call, ?MODULE, spurious_exit, [S#state.pid]} || S#state.pid /= undefined]
 	).
 
 make_args(_S, Size, Overflow) ->
 	[[{size, Size}, {max_overflow, Overflow}, {worker_module, poolboy_test_worker}, {name, {local, poolboy_eqc}}]].
+
+spawn_linked_process(Pool) ->
+	Parent = self(),
+	Pid = spawn(fun() ->
+					link(Pool),
+					Parent ! {linked, self()},
+					timer:sleep(5000)
+			end),
+	receive
+		{linked, Pid} ->
+			Pid
+	end.
 
 start_poolboy(Args) ->
 	{ok, Pid} = poolboy:start_link(Args),
@@ -74,6 +87,10 @@ kill_idle_worker(Pool) ->
 			timer:sleep(1),
 			kill_idle_worker(Pool)
 	end.
+
+spurious_exit(Pool) ->
+	Pid = spawn_linked_process(Pool),
+	exit(Pid, kill).
 
 precondition(S,{call,_,start_poolboy,_}) ->
 	%% only start new pool when old one is stopped
@@ -161,6 +178,8 @@ next_state(S,_V,{call, _, checkin, [_Pool, Worker]}) ->
 next_state(S,_V,{call, _, kill_worker, [Worker]}) ->
 	S#state{checked_out=S#state.checked_out -- [Worker]};
 next_state(S,_V,{call, _, kill_idle_worker, [_Pool]}) ->
+	S;
+next_state(S,_V,{call, _, spurious_exit, [_Pool]}) ->
 	S.
 
 prop_sequential() ->

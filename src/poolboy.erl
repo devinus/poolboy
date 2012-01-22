@@ -251,65 +251,75 @@ handle_info({'EXIT', Pid, _}, StateName, State) ->
            waiting = Waiting,
            max_overflow = MaxOverflow,
            worker_init = InitFun} = State,
-    Monitors = case lists:keytake(Pid, 1, State#state.monitors) of
-        {value, {_, Ref}, Left} -> erlang:demonitor(Ref), Left;
-        false -> State#state.monitors
-    end,
-    case StateName of
-        ready ->
-            W = queue:filter(fun (P) -> P =/= Pid end, State#state.workers),
-            {next_state, ready, State#state{workers=queue:in(new_worker(Sup, InitFun), W),
-                                            monitors=Monitors}};
-        overflow when Overflow == 0 ->
-            W = queue:filter(fun (P) -> P =/= Pid end, State#state.workers),
-            {next_state, ready, State#state{workers=queue:in(new_worker(Sup, InitFun), W),
-                                            monitors=Monitors}};
-        overflow ->
-            {next_state, overflow, State#state{monitors=Monitors,
-                                               overflow=Overflow-1}};
-        full when MaxOverflow < 1 ->
-            case queue:out(Waiting) of
-              {{value, {{FromPid, _}=From, Timeout, StartTime}}, LeftWaiting} ->
-                  case wait_valid(StartTime, Timeout) of
-                      true ->
-                          MonitorRef = erlang:monitor(process, FromPid),
-                          Monitors2 = [{FromPid, MonitorRef} | Monitors],
-                          gen_fsm:reply(From, new_worker(Sup, InitFun)),
-                          {next_state, full, State#state{waiting=LeftWaiting,
-                                                         monitors=Monitors2}};
-                      _ ->
-                          %% replay it
-                          handle_info({'EXIT', Pid, foo}, StateName, State#state{waiting=LeftWaiting})
-                  end;
-              {empty, Empty} ->
-                  Workers2 = queue:in(new_worker(Sup, InitFun), State#state.workers),
-                  {next_state, ready, State#state{monitors=Monitors,
-                                                  waiting=Empty,
-                                                  workers=Workers2}}
-          end;
-        full when Overflow =< MaxOverflow ->
-            case queue:out(Waiting) of
-              {{value, {{FromPid, _}=From, Timeout, StartTime}}, LeftWaiting} ->
-                  case wait_valid(StartTime, Timeout) of
-                      true ->
-                          MonitorRef = erlang:monitor(process, FromPid),
-                          Monitors2 = [{FromPid, MonitorRef} | Monitors],
-                          NewWorker = new_worker(Sup, InitFun),
-                          gen_fsm:reply(From, NewWorker),
-                          {next_state, full, State#state{waiting=LeftWaiting,
-                                                         monitors=Monitors2}};
-                      _ ->
-                          %% replay it
-                          handle_info({'EXIT', Pid, foo}, StateName, State#state{waiting=LeftWaiting})
-                  end;
-              {empty, Empty} ->
-                  {next_state, overflow, State#state{monitors=Monitors,
-                                                     overflow=Overflow-1,
-                                                     waiting=Empty}}
-          end;
-        full ->
-            {next_state, full, State#state{monitors=Monitors,
-                                           overflow=Overflow-1}}
+    case lists:keytake(Pid, 1, State#state.monitors) of
+        {value, {_, Ref}, Monitors} -> erlang:demonitor(Ref),
+            case StateName of
+                ready ->
+                    W = queue:filter(fun (P) -> P =/= Pid end, State#state.workers),
+                    {next_state, ready, State#state{workers=queue:in(new_worker(Sup, InitFun), W),
+                                                    monitors=Monitors}};
+                overflow when Overflow == 0 ->
+                    W = queue:filter(fun (P) -> P =/= Pid end, State#state.workers),
+                    {next_state, ready, State#state{workers=queue:in(new_worker(Sup, InitFun), W),
+                                                    monitors=Monitors}};
+                overflow ->
+                    {next_state, overflow, State#state{monitors=Monitors,
+                                                       overflow=Overflow-1}};
+                full when MaxOverflow < 1 ->
+                    case queue:out(Waiting) of
+                        {{value, {{FromPid, _}=From, Timeout, StartTime}}, LeftWaiting} ->
+                            case wait_valid(StartTime, Timeout) of
+                                true ->
+                                    MonitorRef = erlang:monitor(process, FromPid),
+                                    Monitors2 = [{FromPid, MonitorRef} | Monitors],
+                                    gen_fsm:reply(From, new_worker(Sup, InitFun)),
+                                    {next_state, full, State#state{waiting=LeftWaiting,
+                                                                   monitors=Monitors2}};
+                                _ ->
+                                    %% replay it
+                                    handle_info({'EXIT', Pid, foo}, StateName, State#state{waiting=LeftWaiting})
+                            end;
+                        {empty, Empty} ->
+                            Workers2 = queue:in(new_worker(Sup, InitFun), State#state.workers),
+                            {next_state, ready, State#state{monitors=Monitors,
+                                                            waiting=Empty,
+                                                            workers=Workers2}}
+                    end;
+                full when Overflow =< MaxOverflow ->
+                    case queue:out(Waiting) of
+                        {{value, {{FromPid, _}=From, Timeout, StartTime}}, LeftWaiting} ->
+                            case wait_valid(StartTime, Timeout) of
+                                true ->
+                                    MonitorRef = erlang:monitor(process, FromPid),
+                                    Monitors2 = [{FromPid, MonitorRef} | Monitors],
+                                    NewWorker = new_worker(Sup, InitFun),
+                                    gen_fsm:reply(From, NewWorker),
+                                    {next_state, full, State#state{waiting=LeftWaiting,
+                                                                   monitors=Monitors2}};
+                                _ ->
+                                    %% replay it
+                                    handle_info({'EXIT', Pid, foo}, StateName, State#state{waiting=LeftWaiting})
+                            end;
+                        {empty, Empty} ->
+                            {next_state, overflow, State#state{monitors=Monitors,
+                                                               overflow=Overflow-1,
+                                                               waiting=Empty}}
+                    end;
+                full ->
+                    {next_state, full, State#state{monitors=Monitors,
+                                                   overflow=Overflow-1}}
+            end;
+        _ ->
+            %% not a monitored pid, is it in the worker queue?
+            case queue:member(Pid, State#state.workers) of
+                true ->
+                    %% a checked in worker died
+                    W = queue:filter(fun (P) -> P =/= Pid end, State#state.workers),
+                    {next_state, StateName, State#state{workers=queue:in(new_worker(Sup, InitFun), W)}};
+                _ ->
+                    %% completely irrelevant pid exited, don't change anything
+                    {next_state, StateName, State}
+            end
     end;
 handle_info(_Info, StateName, State) ->
     {next_state, StateName, State}.
