@@ -77,12 +77,16 @@ init([], #state{size=Size, worker_sup=Sup, worker_init=InitFun,
     {ok, StartState, State#state{workers=Workers}}.
 
 ready({checkin, Pid}, State) ->
-    Workers = queue:in(Pid, State#state.workers),
-    Monitors = case lists:keytake(Pid, 1, State#state.monitors) of
-        {value, {_, Ref}, Left} -> erlang:demonitor(Ref), Left;
-        false -> State#state.monitors
-    end,
-    {next_state, ready, State#state{workers=Workers, monitors=Monitors}};
+    case lists:keytake(Pid, 1, State#state.monitors) of
+        {value, {_, Ref}, Monitors} ->
+            erlang:demonitor(Ref),
+            Workers = queue:in(Pid, State#state.workers),
+            {next_state, ready, State#state{workers=Workers,
+                                            monitors=Monitors}};
+        false ->
+            %% unknown process checked in, ignore it
+            {next_state, ready, State}
+    end;
 ready(_Event, State) ->
     {next_state, ready, State}.
 
@@ -122,27 +126,31 @@ ready(_Event, _From, State) ->
     {reply, ok, ready, State}.
 
 overflow({checkin, Pid}, #state{overflow=0}=State) ->
-    %StopFun = State#state.worker_stop,
-    %dismiss_worker(Pid, StopFun),
-    Monitors = case lists:keytake(Pid, 1, State#state.monitors) of
-        {value, {_, Ref}, Left} -> erlang:demonitor(Ref), Left;
-        false -> []
-    end,
-    NextState = case State#state.size > 0 of
-        true -> ready;
-        _ -> overflow
-    end,
-    {next_state, NextState, State#state{overflow=0, monitors=Monitors,
-            workers=queue:in(Pid, State#state.workers)}};
+    case lists:keytake(Pid, 1, State#state.monitors) of
+        {value, {_, Ref}, Monitors} ->
+            erlang:demonitor(Ref),
+            NextState = case State#state.size > 0 of
+                true -> ready;
+                _ -> overflow
+            end,
+            {next_state, NextState, State#state{overflow=0, monitors=Monitors,
+                                                workers=queue:in(Pid, State#state.workers)}};
+        false ->
+            %% unknown process checked in, ignore it
+            {next_state, overflow, State}
+    end;
 overflow({checkin, Pid}, State) ->
     #state{overflow=Overflow, worker_stop=StopFun} = State,
-    dismiss_worker(Pid, StopFun),
-    Monitors = case lists:keytake(Pid, 1, State#state.monitors) of
-        {value, {_, Ref}, Left} -> erlang:demonitor(Ref), Left;
-        false -> State#state.monitors
-    end,
-    {next_state, overflow, State#state{overflow=Overflow-1,
-                                       monitors=Monitors}};
+    case lists:keytake(Pid, 1, State#state.monitors) of
+        {value, {_, Ref}, Monitors} ->
+            dismiss_worker(Pid, StopFun),
+            erlang:demonitor(Ref),
+            {next_state, overflow, State#state{overflow=Overflow-1,
+                                               monitors=Monitors}};
+        _ ->
+            %% unknown process checked in, ignore it
+            {next_state, overflow, State}
+    end;
 overflow(_Event, State) ->
     {next_state, overflow, State}.
 
@@ -174,32 +182,35 @@ overflow(_Event, _From, State) ->
 full({checkin, Pid}, State) ->
     #state{waiting = Waiting, max_overflow = MaxOverflow,
            overflow = Overflow, worker_stop = StopFun} = State,
-    Monitors = case lists:keytake(Pid, 1, State#state.monitors) of
-        {value, {_, Ref0}, Left0} -> erlang:demonitor(Ref0), Left0;
-        false -> State#state.monitors
-    end,
-    case queue:out(Waiting) of
-        {{value, {{FromPid, _}=From, Timeout, StartTime}}, Left} ->
-            case wait_valid(StartTime, Timeout) of
-                true ->
-                    Ref = erlang:monitor(process, FromPid),
-                    Monitors1 = [{Pid, Ref} | Monitors],
-                    gen_fsm:reply(From, Pid),
-                    {next_state, full, State#state{waiting=Left,
-                                                   monitors=Monitors1}};
-                _ ->
-                    %% replay this event with cleaned up waiting queue
-                    full({checkin, Pid}, State#state{waiting=Left})
+    case lists:keytake(Pid, 1, State#state.monitors) of
+        {value, {_, Ref0}, Monitors} ->
+            erlang:demonitor(Ref0),
+            case queue:out(Waiting) of
+                {{value, {{FromPid, _}=From, Timeout, StartTime}}, Left} ->
+                    case wait_valid(StartTime, Timeout) of
+                        true ->
+                            Ref = erlang:monitor(process, FromPid),
+                            Monitors1 = [{Pid, Ref} | Monitors],
+                            gen_fsm:reply(From, Pid),
+                            {next_state, full, State#state{waiting=Left,
+                                                           monitors=Monitors1}};
+                        _ ->
+                            %% replay this event with cleaned up waiting queue
+                            full({checkin, Pid}, State#state{waiting=Left})
+                    end;
+                {empty, Empty} when MaxOverflow < 1 ->
+                    Workers = queue:in(Pid, State#state.workers),
+                    {next_state, ready, State#state{workers=Workers, waiting=Empty,
+                                                    monitors=Monitors}};
+                {empty, Empty} ->
+                    dismiss_worker(Pid, StopFun),
+                    {next_state, overflow, State#state{waiting=Empty,
+                                                       monitors=Monitors,
+                                                       overflow=Overflow-1}}
             end;
-        {empty, Empty} when MaxOverflow < 1 ->
-            Workers = queue:in(Pid, State#state.workers),
-            {next_state, ready, State#state{workers=Workers, waiting=Empty,
-                                            monitors=Monitors}};
-        {empty, Empty} ->
-            dismiss_worker(Pid, StopFun),
-            {next_state, overflow, State#state{waiting=Empty,
-                                               monitors=Monitors,
-                                               overflow=Overflow-1}}
+        false ->
+            %% unknown process checked in, ignore it
+            {next_state, full, State}
     end;
 full(_Event, State) ->
     {next_state, full, State}.

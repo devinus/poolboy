@@ -33,7 +33,7 @@ command(S) ->
 			[{call, ?MODULE, checkout_nonblock, [S#state.pid]} || S#state.pid /= undefined] ++
 			%% checkout shrinks to checkout_nonblock so we can simplify counterexamples
 			[{call, ?MODULE, ?SHRINK(checkout_block, [checkout_nonblock]), [S#state.pid]} || S#state.pid /= undefined] ++
-			[{call, ?MODULE, checkin, [S#state.pid, elements(S#state.checked_out)]} || S#state.pid /= undefined, S#state.checked_out /= []] ++
+			[{call, ?MODULE, checkin, [S#state.pid, fault({call, ?MODULE, spawn_process, []}, elements(S#state.checked_out))]} || S#state.pid /= undefined, S#state.checked_out /= []] ++
 			[{call, ?MODULE, kill_worker, [elements(S#state.checked_out)]} || S#state.pid /= undefined, S#state.checked_out /= []] ++
 			[{call, ?MODULE, kill_idle_worker, [S#state.pid]} || S#state.pid /= undefined] ++
 			[{call, ?MODULE, spurious_exit, [S#state.pid]} || S#state.pid /= undefined]
@@ -41,6 +41,11 @@ command(S) ->
 
 make_args(_S, Size, Overflow) ->
 	[[{size, Size}, {max_overflow, Overflow}, {worker_module, poolboy_test_worker}, {name, {local, poolboy_eqc}}]].
+
+spawn_process() ->
+	spawn(fun() ->
+				timer:sleep(5000)
+		end).
 
 spawn_linked_process(Pool) ->
 	Parent = self(),
@@ -98,8 +103,6 @@ precondition(S,{call,_,start_poolboy,_}) ->
 precondition(S,_) when S#state.pid == undefined ->
 	%% all other states need a running pool
 	false;
-precondition(S, {call, _, checkin, [_Pool, Pid]}) ->
-	lists:member(Pid, S#state.checked_out);
 precondition(S, {call, _, kill_worker, [Pid]}) ->
 	lists:member(Pid, S#state.checked_out);
 precondition(S,{call,_,kill_idle_worker,[_Pool]}) ->
@@ -183,6 +186,7 @@ next_state(S,_V,{call, _, spurious_exit, [_Pool]}) ->
 	S.
 
 prop_sequential() ->
+	fault_rate(1, 10,
 		?FORALL(Cmds,commands(?MODULE),
 			?TRAPEXIT(
 				aggregate(command_names(Cmds), 
@@ -192,7 +196,7 @@ prop_sequential() ->
 							?WHENFAIL(io:format("History: ~p\nState: ~p\nRes: ~p\n~p\n",
 									[H,S,Res, zip(tl(Cmds), [Y || {_, Y} <- H])]),
 								Res == ok)
-					end))).
+					end)))).
 
 checkout_ok(S) ->
 	length(S#state.checked_out) < S#state.size + S#state.max_overflow.
