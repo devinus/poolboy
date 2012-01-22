@@ -33,7 +33,9 @@ command(S) ->
 			[{call, ?MODULE, checkout_nonblock, [S#state.pid]} || S#state.pid /= undefined] ++
 			%% checkout shrinks to checkout_nonblock so we can simplify counterexamples
 			[{call, ?MODULE, ?SHRINK(checkout_block, [checkout_nonblock]), [S#state.pid]} || S#state.pid /= undefined] ++
-			[{call, ?MODULE, checkin, [S#state.pid, elements(S#state.checked_out)]} || S#state.pid /= undefined, S#state.checked_out /= []]
+			[{call, ?MODULE, checkin, [S#state.pid, elements(S#state.checked_out)]} || S#state.pid /= undefined, S#state.checked_out /= []] ++
+			[{call, ?MODULE, kill_worker, [elements(S#state.checked_out)]} || S#state.pid /= undefined, S#state.checked_out /= []
+			]
 	).
 
 make_args(_S, Size, Overflow) ->
@@ -58,6 +60,10 @@ checkin(Pool, Worker) ->
 	gen_fsm:sync_send_all_state_event(Pool, get_avail_workers),
 	Res.
 
+kill_worker(Worker) ->
+	exit(Worker, kill),
+	timer:sleep(1).
+
 precondition(S,{call,_,start_poolboy,_}) ->
 	%% only start new pool when old one is stopped
   S#state.pid == undefined;
@@ -66,7 +72,32 @@ precondition(S,_) when S#state.pid == undefined ->
 	false;
 precondition(S, {call, _, checkin, [_Pool, Pid]}) ->
 	lists:member(Pid, S#state.checked_out);
+precondition(S, {call, _, kill_worker, [Pid]}) ->
+	lists:member(Pid, S#state.checked_out);
 precondition(_S,{call,_,_,_}) ->
+	true.
+
+%% XXX comment out for parallel mode XXX
+dynamic_precondition(S = #state{pid=Pid},_) when Pid /= undefined ->
+	State = if length(S#state.checked_out) == S#state.size + S#state.max_overflow ->
+			full;
+		length(S#state.checked_out) >= S#state.size ->
+			overflow;
+		true ->
+			ready
+	end,
+
+	Workers = max(0, S#state.size - length(S#state.checked_out)),
+	OverFlow = max(0, length(S#state.checked_out) - S#state.size),
+
+	RealStatus = gen_fsm:sync_send_all_state_event(Pid, status),
+	case RealStatus == {State, Workers, OverFlow} of
+		true ->
+			true;
+		_ ->
+			exit({wrong_state, RealStatus, {State, Workers, OverFlow}})
+	end;
+dynamic_precondition(_,_) ->
 	true.
 
 postcondition(S,{call,_,checkout_block,[_Pool]},R) ->
@@ -112,7 +143,10 @@ next_state(S,V,{call,_,checkout_nonblock,_}) ->
 			S#state{checked_out=S#state.checked_out++[V]}
 	end;
 next_state(S,_V,{call, _, checkin, [_Pool, Worker]}) ->
+	S#state{checked_out=S#state.checked_out -- [Worker]};
+next_state(S,_V,{call, _, kill_worker, [Worker]}) ->
 	S#state{checked_out=S#state.checked_out -- [Worker]}.
+
 
 
 prop_sequential() ->

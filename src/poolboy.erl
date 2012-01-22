@@ -66,9 +66,15 @@ init([{stop_fun, StopFun} | Rest], State) when is_function(StopFun) ->
     init(Rest, State#state{worker_stop=StopFun});
 init([_ | Rest], State) ->
     init(Rest, State);
-init([], #state{size=Size, worker_sup=Sup, worker_init=InitFun}=State) ->
+init([], #state{size=Size, worker_sup=Sup, worker_init=InitFun,
+        max_overflow=MaxOverflow}=State) ->
     Workers = prepopulate(Size, Sup, InitFun),
-    {ok, ready, State#state{workers=Workers}}.
+    StartState = case queue:len(Workers) of
+        0 when MaxOverflow ==0 -> full;
+        0 -> overflow;
+        _ -> ready
+    end,
+    {ok, StartState, State#state{workers=Workers}}.
 
 ready({checkin, Pid}, State) ->
     Workers = queue:in(Pid, State#state.workers),
@@ -89,8 +95,16 @@ ready({checkout, Block, Timeout}, {FromPid, _}=From, State) ->
         {{value, Pid}, Left} ->
             Ref = erlang:monitor(process, FromPid),
             Monitors = [{Pid, Ref} | State#state.monitors],
-            {reply, Pid, ready, State#state{workers=Left,
-                                            monitors=Monitors}};
+            NextState = case queue:len(Left) of
+                0 when MaxOverflow == 0 ->
+                    full;
+                0 ->
+                    overflow;
+                _ ->
+                    ready
+            end,
+            {reply, Pid, NextState, State#state{workers=Left,
+                                                monitors=Monitors}};
         {empty, Empty} when MaxOverflow > 0 ->
             {Pid, Ref} = new_worker(Sup, FromPid, InitFun),
             Monitors = [{Pid, Ref} | State#state.monitors],
@@ -107,14 +121,19 @@ ready({checkout, Block, Timeout}, {FromPid, _}=From, State) ->
 ready(_Event, _From, State) ->
     {reply, ok, ready, State}.
 
-overflow({checkin, Pid}, #state{overflow=1}=State) ->
-    StopFun = State#state.worker_stop,
-    dismiss_worker(Pid, StopFun),
+overflow({checkin, Pid}, #state{overflow=0}=State) ->
+    %StopFun = State#state.worker_stop,
+    %dismiss_worker(Pid, StopFun),
     Monitors = case lists:keytake(Pid, 1, State#state.monitors) of
         {value, {_, Ref}, Left} -> erlang:demonitor(Ref), Left;
         false -> []
     end,
-    {next_state, ready, State#state{overflow=0, monitors=Monitors}};
+    NextState = case State#state.size > 0 of
+        true -> ready;
+        _ -> overflow
+    end,
+    {next_state, NextState, State#state{overflow=0, monitors=Monitors,
+            workers=queue:in(Pid, State#state.workers)}};
 overflow({checkin, Pid}, State) ->
     #state{overflow=Overflow, worker_stop=StopFun} = State,
     dismiss_worker(Pid, StopFun),
@@ -138,11 +157,17 @@ overflow({checkout, Block, Timeout}, From, #state{overflow=Overflow,
             {next_state, full, State#state{waiting=add_waiting(From, Timeout, Waiting)}}
     end;
 overflow({checkout, _Block, _Timeout}, {From, _}, State) ->
-    #state{worker_sup=Sup, overflow=Overflow, worker_init=InitFun} = State,
+    #state{worker_sup=Sup, overflow=Overflow,
+        worker_init=InitFun, max_overflow=MaxOverflow} = State,
     {Pid, Ref} = new_worker(Sup, From, InitFun),
     Monitors = [{Pid, Ref} | State#state.monitors],
-    {reply, Pid, overflow, State#state{monitors=Monitors,
-                                       overflow=Overflow+1}};
+    NewOverflow = Overflow + 1,
+    Next = case NewOverflow >= MaxOverflow of
+        true -> full;
+        _ -> overflow
+    end,
+    {reply, Pid, Next, State#state{monitors=Monitors,
+                                       overflow=NewOverflow}};
 overflow(_Event, _From, State) ->
     {reply, ok, overflow, State}.
 
@@ -204,6 +229,10 @@ handle_sync_event(stop, _From, _StateName,State) ->
     Sup = State#state.worker_sup,
     exit(Sup, shutdown),
     {stop, normal, ok, State};
+handle_sync_event(status, _From, StateName, State) ->
+    {reply, {StateName, queue:len(State#state.workers),
+            State#state.overflow},
+        StateName, State};
 handle_sync_event(_Event, _From, StateName, State) ->
     Reply = {error, invalid_message},
     {reply, Reply, StateName, State}.
@@ -231,8 +260,10 @@ handle_info({'EXIT', Pid, _}, StateName, State) ->
             W = queue:filter(fun (P) -> P =/= Pid end, State#state.workers),
             {next_state, ready, State#state{workers=queue:in(new_worker(Sup, InitFun), W),
                                             monitors=Monitors}};
-        overflow when Overflow =< 1 ->
-            {next_state, ready, State#state{monitors=Monitors, overflow=0}};
+        overflow when Overflow == 0 ->
+            W = queue:filter(fun (P) -> P =/= Pid end, State#state.workers),
+            {next_state, ready, State#state{workers=queue:in(new_worker(Sup, InitFun), W),
+                                            monitors=Monitors}};
         overflow ->
             {next_state, overflow, State#state{monitors=Monitors,
                                                overflow=Overflow-1}};
