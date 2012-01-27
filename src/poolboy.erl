@@ -70,7 +70,7 @@ init([], #state{size=Size, worker_sup=Sup, worker_init=InitFun,
         max_overflow=MaxOverflow}=State) ->
     Workers = prepopulate(Size, Sup, InitFun),
     StartState = case queue:len(Workers) of
-        0 when MaxOverflow ==0 -> full;
+        0 when MaxOverflow =:= 0 -> full;
         0 -> overflow;
         _ -> ready
     end,
@@ -155,8 +155,8 @@ overflow(_Event, State) ->
     {next_state, overflow, State}.
 
 overflow({checkout, Block, Timeout}, From, #state{overflow=Overflow,
-                                         max_overflow=MaxOverflow
-                                         }=State) when Overflow >= MaxOverflow ->
+                                                  max_overflow=MaxOverflow
+                                                  }=State) when Overflow >= MaxOverflow ->
     case Block of
         false ->
             {reply, full, full, State};
@@ -175,7 +175,7 @@ overflow({checkout, _Block, _Timeout}, {From, _}, State) ->
         _ -> overflow
     end,
     {reply, Pid, Next, State#state{monitors=Monitors,
-                                       overflow=NewOverflow}};
+                                   overflow=NewOverflow}};
 overflow(_Event, _From, State) ->
     {reply, ok, overflow, State}.
 
@@ -256,7 +256,7 @@ handle_info({'DOWN', Ref, _, _, _}, StateName, State) ->
         false ->
             {next_state, StateName, State}
     end;
-handle_info({'EXIT', Pid, _}, StateName, State) ->
+handle_info({'EXIT', Pid, Reason}, StateName, State) ->
     #state{worker_sup = Sup,
            overflow = Overflow,
            waiting = Waiting,
@@ -288,7 +288,7 @@ handle_info({'EXIT', Pid, _}, StateName, State) ->
                                                                    monitors=Monitors2}};
                                 _ ->
                                     %% replay it
-                                    handle_info({'EXIT', Pid, foo}, StateName, State#state{waiting=LeftWaiting})
+                                    handle_info({'EXIT', Pid, Reason}, StateName, State#state{waiting=LeftWaiting})
                             end;
                         {empty, Empty} ->
                             Workers2 = queue:in(new_worker(Sup, InitFun), State#state.workers),
@@ -309,7 +309,7 @@ handle_info({'EXIT', Pid, _}, StateName, State) ->
                                                                    monitors=Monitors2}};
                                 _ ->
                                     %% replay it
-                                    handle_info({'EXIT', Pid, foo}, StateName, State#state{waiting=LeftWaiting})
+                                    handle_info({'EXIT', Pid, Reason}, StateName, State#state{waiting=LeftWaiting})
                             end;
                         {empty, Empty} ->
                             {next_state, overflow, State#state{monitors=Monitors,
