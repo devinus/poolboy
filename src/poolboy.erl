@@ -3,7 +3,7 @@
 -module(poolboy).
 -behaviour(gen_fsm).
 
--export([start_link/1, checkout/1, checkout/2, checkout/3, checkin/2]).
+-export([start_link/1, checkout/1, checkout/2, checkout/3, checkin/2, stop/1]).
 -export([init/1, ready/2, ready/3, overflow/2, overflow/3, full/2, full/3,
          handle_event/3, handle_sync_event/4, handle_info/3, terminate/3,
          code_change/4]).
@@ -48,6 +48,9 @@ start_link(Args) ->
         Name ->
             gen_fsm:start_link(Name, ?MODULE, Args, [])
     end.
+
+stop(Pool) ->
+    gen_fsm:sync_send_all_state_event(Pool, stop).
 
 init(Args) ->
     process_flag(trap_exit, true),
