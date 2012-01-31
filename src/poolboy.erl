@@ -285,8 +285,9 @@ handle_info({'EXIT', Pid, Reason}, StateName, State) ->
                             case wait_valid(StartTime, Timeout) of
                                 true ->
                                     MonitorRef = erlang:monitor(process, FromPid),
-                                    Monitors2 = [{FromPid, MonitorRef} | Monitors],
-                                    gen_fsm:reply(From, new_worker(Sup, InitFun)),
+                                    NewWorker = new_worker(Sup, InitFun),
+                                    Monitors2 = [{NewWorker, MonitorRef} | Monitors],
+                                    gen_fsm:reply(From, NewWorker),
                                     {next_state, full, State#state{waiting=LeftWaiting,
                                                                    monitors=Monitors2}};
                                 _ ->
@@ -305,8 +306,8 @@ handle_info({'EXIT', Pid, Reason}, StateName, State) ->
                             case wait_valid(StartTime, Timeout) of
                                 true ->
                                     MonitorRef = erlang:monitor(process, FromPid),
-                                    Monitors2 = [{FromPid, MonitorRef} | Monitors],
                                     NewWorker = new_worker(Sup, InitFun),
+                                    Monitors2 = [{NewWorker, MonitorRef} | Monitors],
                                     gen_fsm:reply(From, NewWorker),
                                     {next_state, full, State#state{waiting=LeftWaiting,
                                                                    monitors=Monitors2}};

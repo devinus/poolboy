@@ -9,9 +9,12 @@
 -include_lib("eunit/include/eunit.hrl").
 
 poolboy_test_() ->
-	{timeout, 300,
+	{timeout, 20,
 		fun() ->
-				?assert(eqc:quickcheck(eqc:testing_time(290, poolboy_eqc:prop_parallel())))
+				?assert(eqc:quickcheck(eqc:testing_time(4,
+							poolboy_eqc:prop_sequential()))),
+				?assert(eqc:quickcheck(eqc:testing_time(4,
+							poolboy_eqc:prop_parallel())))
 		end
 	}.
 
