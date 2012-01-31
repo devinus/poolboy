@@ -245,10 +245,11 @@ worker_death_while_full() ->
     Self = self(),
     spawn(fun() ->
         poolboy:checkout(Pid),
-        Self ! got_worker
+        Self ! got_worker,
         %% XXX: Don't release the worker. We want to also test what happens
         %% when the worker pool is full and a worker dies with no queued
         %% checkouts.
+        timer:sleep(5000)
     end),
 
     %% Spawned process should block waiting for worker to be available.
@@ -287,9 +288,10 @@ worker_death_while_full_no_overflow() ->
     Self = self(),
     spawn(fun() ->
         poolboy:checkout(Pid),
-        Self ! got_worker
+        Self ! got_worker,
         %% XXX: Do not release, need to also test when worker dies and no
         %% checkouts queued.
+        timer:sleep(5000)
     end),
 
     %% Spawned process should block waiting for worker to be available.
