@@ -11,8 +11,11 @@ poolboy:checkin(PoolName, Worker),
 Reply.
 ```
 
-Example Application
--------------------
+Example
+-------
+
+This is an example application showcasing database connection pools using
+Poolboy and Will Glozer's [epgsql](https://github.com/wg/epgsql).
 
 ### example.app
 
@@ -54,14 +57,21 @@ Example Application
 -behaviour(application).
 -behaviour(supervisor).
 
--export([start/0, stop/0, start/2, stop/1, init/1, squery/2, equery/3]).
+-export([start/0, stop/0, query/2, query/3]).
+-export([start/2, stop/1]).
+-export([init/1]).
 
-start() -> application:start(?MODULE).
-stop()  -> application:stop(?MODULE).
+start() ->
+    application:start(?MODULE).
+
+stop() ->
+    application:stop(?MODULE).
 
 start(_Type, _Args) ->
     supervisor:start_link({local, example_sup}, ?MODULE, []).
-stop(_State) -> ok.
+
+stop(_State) ->
+    ok.
 
 init([]) ->
     {ok, Pools} = application:get_env(example, pools),
@@ -74,15 +84,15 @@ init([]) ->
     end, Pools),
     {ok, {{one_for_one, 10, 10}, PoolSpecs}}.
 
-squery(PoolName, Sql) ->
+query(PoolName, Sql) ->
     Worker = poolboy:checkout(PoolName),
-    Reply = gen_server:call(Worker, {squery, Sql}),
+    Reply = gen_server:call(Worker, {query, Sql}),
     poolboy:checkin(PoolName, Worker),
     Reply.
 
-equery(PoolName, Stmt, Params) ->
+query(PoolName, Stmt, Params) ->
     Worker = poolboy:checkout(PoolName),
-    Reply = gen_server:call(Worker, {equery, Stmt, Params}),
+    Reply = gen_server:call(Worker, {query, Stmt, Params}),
     poolboy:checkin(PoolName, Worker),
     Reply.
 ```
@@ -92,14 +102,16 @@ equery(PoolName, Stmt, Params) ->
 ```erlang
 -module(example_worker).
 -behaviour(gen_server).
+-behaviour(poolboy_worker).
 
--export([start_link/1, stop/0, init/1, handle_call/3, handle_cast/2,
-         handle_info/2, terminate/2, code_change/3]).
+-export([start_link/1]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
+         code_change/3]).
 
 -record(state, {conn}).
 
-start_link(Args) -> gen_server:start_link(?MODULE, Args, []).
-stop() -> gen_server:cast(?MODULE, stop).
+start_link(Args) ->
+    gen_server:start_link(?MODULE, Args, []).
 
 init(Args) ->
     process_flag(trap_exit, true),
@@ -112,9 +124,9 @@ init(Args) ->
     ]),
     {ok, #state{conn=Conn}}.
 
-handle_call({squery, Sql}, _From, #state{conn=Conn}=State) ->
+handle_call({query, Sql}, _From, #state{conn=Conn}=State) ->
     {reply, pgsql:squery(Conn, Sql), State};
-handle_call({equery, Stmt, Params}, _From, #state{conn=Conn}=State) ->
+handle_call({query, Stmt, Params}, _From, #state{conn=Conn}=State) ->
     {reply, pgsql:equery(Conn, Stmt, Params), State};
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
