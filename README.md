@@ -57,7 +57,7 @@ Poolboy and Will Glozer's [epgsql](https://github.com/wg/epgsql).
 -behaviour(application).
 -behaviour(supervisor).
 
--export([start/0, stop/0, query/2, query/3]).
+-export([start/0, stop/0, squery/2, equery/3]).
 -export([start/2, stop/1]).
 -export([init/1]).
 
@@ -84,15 +84,15 @@ init([]) ->
     end, Pools),
     {ok, {{one_for_one, 10, 10}, PoolSpecs}}.
 
-query(PoolName, Sql) ->
+squery(PoolName, Sql) ->
     Worker = poolboy:checkout(PoolName),
-    Reply = gen_server:call(Worker, {query, Sql}),
+    Reply = gen_server:call(Worker, {squery, Sql}),
     poolboy:checkin(PoolName, Worker),
     Reply.
 
-query(PoolName, Stmt, Params) ->
+equery(PoolName, Stmt, Params) ->
     Worker = poolboy:checkout(PoolName),
-    Reply = gen_server:call(Worker, {query, Stmt, Params}),
+    Reply = gen_server:call(Worker, {equery, Stmt, Params}),
     poolboy:checkin(PoolName, Worker),
     Reply.
 ```
@@ -124,9 +124,9 @@ init(Args) ->
     ]),
     {ok, #state{conn=Conn}}.
 
-handle_call({query, Sql}, _From, #state{conn=Conn}=State) ->
+handle_call({squery, Sql}, _From, #state{conn=Conn}=State) ->
     {reply, pgsql:squery(Conn, Sql), State};
-handle_call({query, Stmt, Params}, _From, #state{conn=Conn}=State) ->
+handle_call({equery, Stmt, Params}, _From, #state{conn=Conn}=State) ->
     {reply, pgsql:equery(Conn, Stmt, Params), State};
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
