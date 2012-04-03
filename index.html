@@ -1,0 +1,230 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="chrome=1">
+    <title>Poolboy by devinus</title>
+    <link rel="stylesheet" href="stylesheets/styles.css">
+    <link rel="stylesheet" href="stylesheets/pygment_trac.css">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.1/jquery.min.js"></script>
+    <script src="javascripts/main.js"></script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+
+  </head>
+  <body>
+
+      <header>
+        <h1>Poolboy</h1>
+        <p>A hunky Erlang worker pool factory</p>
+      </header>
+
+      <div id="banner">
+        <span id="logo"></span>
+
+        <a href="https://github.com/devinus/poolboy" class="button fork"><strong>Fork On GitHub</strong></a>
+        <div class="downloads">
+          <span>Downloads:</span>
+          <ul>
+            <li><a href="https://github.com/devinus/poolboy/zipball/master" class="button">ZIP</a></li>
+            <li><a href="https://github.com/devinus/poolboy/tarball/master" class="button">TAR</a></li>
+          </ul>
+        </div>
+
+      </div><!-- end banner -->
+
+    <div class="wrapper">
+      <nav>
+        <ul></ul>
+      </nav>
+      <section>
+        <h1>Usage</h1>
+
+<div class="highlight">
+<pre><span class="nv">Worker</span> <span class="o">=</span> <span class="nn">poolboy</span><span class="p">:</span><span class="n">checkout</span><span class="p">(</span><span class="nv">PoolName</span><span class="p">),</span>
+<span class="nv">Reply</span> <span class="o">=</span> <span class="nn">gen_server</span><span class="p">:</span><span class="n">call</span><span class="p">(</span><span class="nv">Worker</span><span class="p">,</span> <span class="nv">WorkerFun</span><span class="p">),</span>
+<span class="nn">poolboy</span><span class="p">:</span><span class="n">checkin</span><span class="p">(</span><span class="nv">PoolName</span><span class="p">,</span> <span class="nv">Worker</span><span class="p">),</span>
+<span class="nv">Reply</span><span class="p">.</span>
+</pre>
+</div>
+
+
+<h1>Example</h1>
+
+<p>This is an example application showcasing database connection pools using
+Poolboy and Will Glozer's <a href="https://github.com/wg/epgsql">epgsql</a>.</p>
+
+<h2>example.app</h2>
+
+<div class="highlight">
+<pre><span class="p">{</span><span class="n">application</span><span class="p">,</span> <span class="n">example</span><span class="p">,</span> <span class="p">[</span>
+    <span class="p">{</span><span class="n">description</span><span class="p">,</span> <span class="s">"An example application"</span><span class="p">},</span>
+    <span class="p">{</span><span class="n">vsn</span><span class="p">,</span> <span class="s">"0.1"</span><span class="p">},</span>
+    <span class="p">{</span><span class="n">applications</span><span class="p">,</span> <span class="p">[</span><span class="n">kernel</span><span class="p">,</span> <span class="n">stdlib</span><span class="p">,</span> <span class="n">sasl</span><span class="p">,</span> <span class="n">crypto</span><span class="p">,</span> <span class="n">ssl</span><span class="p">]},</span>
+    <span class="p">{</span><span class="n">modules</span><span class="p">,</span> <span class="p">[</span><span class="n">example</span><span class="p">,</span> <span class="n">example_worker</span><span class="p">]},</span>
+    <span class="p">{</span><span class="n">registered</span><span class="p">,</span> <span class="p">[</span><span class="n">example</span><span class="p">]},</span>
+    <span class="p">{</span><span class="n">mod</span><span class="p">,</span> <span class="p">{</span><span class="n">example</span><span class="p">,</span> <span class="p">[]}},</span>
+    <span class="p">{</span><span class="n">env</span><span class="p">,</span> <span class="p">[</span>
+        <span class="p">{</span><span class="n">pools</span><span class="p">,</span> <span class="p">[</span>
+            <span class="p">{</span><span class="n">pool1</span><span class="p">,</span> <span class="p">[</span>
+                <span class="p">{</span><span class="nb">size</span><span class="p">,</span> <span class="mi">10</span><span class="p">},</span>
+                <span class="p">{</span><span class="n">max_overflow</span><span class="p">,</span> <span class="mi">20</span><span class="p">},</span>
+                <span class="p">{</span><span class="n">hostname</span><span class="p">,</span> <span class="s">"127.0.0.1"</span><span class="p">},</span>
+                <span class="p">{</span><span class="n">database</span><span class="p">,</span> <span class="s">"db1"</span><span class="p">},</span>
+                <span class="p">{</span><span class="n">username</span><span class="p">,</span> <span class="s">"db1"</span><span class="p">},</span>
+                <span class="p">{</span><span class="n">password</span><span class="p">,</span> <span class="s">"abc123"</span><span class="p">}</span>
+            <span class="p">]},</span>
+            <span class="p">{</span><span class="n">pool2</span><span class="p">,</span> <span class="p">[</span>
+                <span class="p">{</span><span class="nb">size</span><span class="p">,</span> <span class="mi">5</span><span class="p">},</span>
+                <span class="p">{</span><span class="n">max_overflow</span><span class="p">,</span> <span class="mi">10</span><span class="p">},</span>
+                <span class="p">{</span><span class="n">hostname</span><span class="p">,</span> <span class="s">"127.0.0.1"</span><span class="p">},</span>
+                <span class="p">{</span><span class="n">database</span><span class="p">,</span> <span class="s">"db2"</span><span class="p">},</span>
+                <span class="p">{</span><span class="n">username</span><span class="p">,</span> <span class="s">"db2"</span><span class="p">},</span>
+                <span class="p">{</span><span class="n">password</span><span class="p">,</span> <span class="s">"abc123"</span><span class="p">}</span>
+            <span class="p">]}</span>
+        <span class="p">]}</span>
+    <span class="p">]}</span>
+<span class="p">]}.</span>
+</pre>
+</div>
+
+
+<h2>example.erl</h2>
+
+<div class="highlight">
+<pre><span class="p">-</span><span class="ni">module</span><span class="p">(</span><span class="n">example</span><span class="p">).</span>
+<span class="p">-</span><span class="ni">behaviour</span><span class="p">(</span><span class="n">application</span><span class="p">).</span>
+<span class="p">-</span><span class="ni">behaviour</span><span class="p">(</span><span class="n">supervisor</span><span class="p">).</span>
+
+<span class="p">-</span><span class="ni">export</span><span class="p">([</span><span class="n">start</span><span class="o">/</span><span class="mi">0</span><span class="p">,</span> <span class="n">stop</span><span class="o">/</span><span class="mi">0</span><span class="p">,</span> <span class="n">squery</span><span class="o">/</span><span class="mi">2</span><span class="p">,</span> <span class="n">equery</span><span class="o">/</span><span class="mi">3</span><span class="p">]).</span>
+<span class="p">-</span><span class="ni">export</span><span class="p">([</span><span class="n">start</span><span class="o">/</span><span class="mi">2</span><span class="p">,</span> <span class="n">stop</span><span class="o">/</span><span class="mi">1</span><span class="p">]).</span>
+<span class="p">-</span><span class="ni">export</span><span class="p">([</span><span class="n">init</span><span class="o">/</span><span class="mi">1</span><span class="p">]).</span>
+
+<span class="nf">start</span><span class="p">()</span> <span class="o">-&gt;</span>
+    <span class="nn">application</span><span class="p">:</span><span class="n">start</span><span class="p">(</span><span class="o">?</span><span class="nv">MODULE</span><span class="p">).</span>
+
+<span class="nf">stop</span><span class="p">()</span> <span class="o">-&gt;</span>
+    <span class="nn">application</span><span class="p">:</span><span class="n">stop</span><span class="p">(</span><span class="o">?</span><span class="nv">MODULE</span><span class="p">).</span>
+
+<span class="nf">start</span><span class="p">(_</span><span class="nv">Type</span><span class="p">,</span> <span class="p">_</span><span class="nv">Args</span><span class="p">)</span> <span class="o">-&gt;</span>
+    <span class="nn">supervisor</span><span class="p">:</span><span class="n">start_link</span><span class="p">({</span><span class="n">local</span><span class="p">,</span> <span class="n">example_sup</span><span class="p">},</span> <span class="o">?</span><span class="nv">MODULE</span><span class="p">,</span> <span class="p">[]).</span>
+
+<span class="nf">stop</span><span class="p">(_</span><span class="nv">State</span><span class="p">)</span> <span class="o">-&gt;</span>
+    <span class="n">ok</span><span class="p">.</span>
+
+<span class="nf">init</span><span class="p">([])</span> <span class="o">-&gt;</span>
+    <span class="p">{</span><span class="n">ok</span><span class="p">,</span> <span class="nv">Pools</span><span class="p">}</span> <span class="o">=</span> <span class="nn">application</span><span class="p">:</span><span class="n">get_env</span><span class="p">(</span><span class="n">example</span><span class="p">,</span> <span class="n">pools</span><span class="p">),</span>
+    <span class="nv">PoolSpecs</span> <span class="o">=</span> <span class="nn">lists</span><span class="p">:</span><span class="n">map</span><span class="p">(</span><span class="k">fun</span><span class="p">({</span><span class="nv">PoolName</span><span class="p">,</span> <span class="nv">PoolConfig</span><span class="p">})</span> <span class="o">-&gt;</span>
+        <span class="nv">Args</span> <span class="o">=</span> <span class="p">[{</span><span class="n">name</span><span class="p">,</span> <span class="p">{</span><span class="n">local</span><span class="p">,</span> <span class="nv">PoolName</span><span class="p">}},</span>
+                <span class="p">{</span><span class="n">worker_module</span><span class="p">,</span> <span class="n">example_worker</span><span class="p">}]</span>
+                <span class="o">++</span> <span class="nv">PoolConfig</span><span class="p">,</span>
+        <span class="p">{</span><span class="nv">PoolName</span><span class="p">,</span> <span class="p">{</span><span class="n">poolboy</span><span class="p">,</span> <span class="n">start_link</span><span class="p">,</span> <span class="p">[</span><span class="nv">Args</span><span class="p">]},</span>
+                    <span class="n">permanent</span><span class="p">,</span> <span class="mi">5000</span><span class="p">,</span> <span class="n">worker</span><span class="p">,</span> <span class="p">[</span><span class="n">poolboy</span><span class="p">]}</span>
+    <span class="k">end</span><span class="p">,</span> <span class="nv">Pools</span><span class="p">),</span>
+    <span class="p">{</span><span class="n">ok</span><span class="p">,</span> <span class="p">{{</span><span class="n">one_for_one</span><span class="p">,</span> <span class="mi">10</span><span class="p">,</span> <span class="mi">10</span><span class="p">},</span> <span class="nv">PoolSpecs</span><span class="p">}}.</span>
+
+<span class="nf">squery</span><span class="p">(</span><span class="nv">PoolName</span><span class="p">,</span> <span class="nv">Sql</span><span class="p">)</span> <span class="o">-&gt;</span>
+    <span class="nv">Worker</span> <span class="o">=</span> <span class="nn">poolboy</span><span class="p">:</span><span class="n">checkout</span><span class="p">(</span><span class="nv">PoolName</span><span class="p">),</span>
+    <span class="nv">Reply</span> <span class="o">=</span> <span class="nn">gen_server</span><span class="p">:</span><span class="n">call</span><span class="p">(</span><span class="nv">Worker</span><span class="p">,</span> <span class="p">{</span><span class="n">squery</span><span class="p">,</span> <span class="nv">Sql</span><span class="p">}),</span>
+    <span class="nn">poolboy</span><span class="p">:</span><span class="n">checkin</span><span class="p">(</span><span class="nv">PoolName</span><span class="p">,</span> <span class="nv">Worker</span><span class="p">),</span>
+    <span class="nv">Reply</span><span class="p">.</span>
+
+<span class="nf">equery</span><span class="p">(</span><span class="nv">PoolName</span><span class="p">,</span> <span class="nv">Stmt</span><span class="p">,</span> <span class="nv">Params</span><span class="p">)</span> <span class="o">-&gt;</span>
+    <span class="nv">Worker</span> <span class="o">=</span> <span class="nn">poolboy</span><span class="p">:</span><span class="n">checkout</span><span class="p">(</span><span class="nv">PoolName</span><span class="p">),</span>
+    <span class="nv">Reply</span> <span class="o">=</span> <span class="nn">gen_server</span><span class="p">:</span><span class="n">call</span><span class="p">(</span><span class="nv">Worker</span><span class="p">,</span> <span class="p">{</span><span class="n">equery</span><span class="p">,</span> <span class="nv">Stmt</span><span class="p">,</span> <span class="nv">Params</span><span class="p">}),</span>
+    <span class="nn">poolboy</span><span class="p">:</span><span class="n">checkin</span><span class="p">(</span><span class="nv">PoolName</span><span class="p">,</span> <span class="nv">Worker</span><span class="p">),</span>
+    <span class="nv">Reply</span><span class="p">.</span>
+</pre>
+</div>
+
+
+<h2>example_worker.erl</h2>
+
+<div class="highlight">
+<pre><span class="p">-</span><span class="ni">module</span><span class="p">(</span><span class="n">example_worker</span><span class="p">).</span>
+<span class="p">-</span><span class="ni">behaviour</span><span class="p">(</span><span class="n">gen_server</span><span class="p">).</span>
+<span class="p">-</span><span class="ni">behaviour</span><span class="p">(</span><span class="n">poolboy_worker</span><span class="p">).</span>
+
+<span class="p">-</span><span class="ni">export</span><span class="p">([</span><span class="n">start_link</span><span class="o">/</span><span class="mi">1</span><span class="p">]).</span>
+<span class="p">-</span><span class="ni">export</span><span class="p">([</span><span class="n">init</span><span class="o">/</span><span class="mi">1</span><span class="p">,</span> <span class="n">handle_call</span><span class="o">/</span><span class="mi">3</span><span class="p">,</span> <span class="n">handle_cast</span><span class="o">/</span><span class="mi">2</span><span class="p">,</span> <span class="n">handle_info</span><span class="o">/</span><span class="mi">2</span><span class="p">,</span> <span class="n">terminate</span><span class="o">/</span><span class="mi">2</span><span class="p">,</span>
+         <span class="n">code_change</span><span class="o">/</span><span class="mi">3</span><span class="p">]).</span>
+
+<span class="p">-</span><span class="ni">record</span><span class="p">(</span><span class="nl">state</span><span class="p">,</span> <span class="p">{</span><span class="n">conn</span><span class="p">}).</span>
+
+<span class="nf">start_link</span><span class="p">(</span><span class="nv">Args</span><span class="p">)</span> <span class="o">-&gt;</span>
+    <span class="nn">gen_server</span><span class="p">:</span><span class="n">start_link</span><span class="p">(</span><span class="o">?</span><span class="nv">MODULE</span><span class="p">,</span> <span class="nv">Args</span><span class="p">,</span> <span class="p">[]).</span>
+
+<span class="nf">init</span><span class="p">(</span><span class="nv">Args</span><span class="p">)</span> <span class="o">-&gt;</span>
+    <span class="nb">process_flag</span><span class="p">(</span><span class="n">trap_exit</span><span class="p">,</span> <span class="n">true</span><span class="p">),</span>
+    <span class="nv">Hostname</span> <span class="o">=</span> <span class="nn">proplists</span><span class="p">:</span><span class="n">get_value</span><span class="p">(</span><span class="n">hostname</span><span class="p">,</span> <span class="nv">Args</span><span class="p">),</span>
+    <span class="nv">Database</span> <span class="o">=</span> <span class="nn">proplists</span><span class="p">:</span><span class="n">get_value</span><span class="p">(</span><span class="n">database</span><span class="p">,</span> <span class="nv">Args</span><span class="p">),</span>
+    <span class="nv">Username</span> <span class="o">=</span> <span class="nn">proplists</span><span class="p">:</span><span class="n">get_value</span><span class="p">(</span><span class="n">username</span><span class="p">,</span> <span class="nv">Args</span><span class="p">),</span>
+    <span class="nv">Password</span> <span class="o">=</span> <span class="nn">proplists</span><span class="p">:</span><span class="n">get_value</span><span class="p">(</span><span class="n">password</span><span class="p">,</span> <span class="nv">Args</span><span class="p">),</span>
+    <span class="p">{</span><span class="n">ok</span><span class="p">,</span> <span class="nv">Conn</span><span class="p">}</span> <span class="o">=</span> <span class="nn">pgsql</span><span class="p">:</span><span class="n">connect</span><span class="p">(</span><span class="nv">Hostname</span><span class="p">,</span> <span class="nv">Username</span><span class="p">,</span> <span class="nv">Password</span><span class="p">,</span> <span class="p">[</span>
+        <span class="p">{</span><span class="n">database</span><span class="p">,</span> <span class="nv">Database</span><span class="p">}</span>
+    <span class="p">]),</span>
+    <span class="p">{</span><span class="n">ok</span><span class="p">,</span> <span class="nl">#state</span><span class="p">{</span><span class="n">conn</span><span class="o">=</span><span class="nv">Conn</span><span class="p">}}.</span>
+
+<span class="nf">handle_call</span><span class="p">({</span><span class="n">squery</span><span class="p">,</span> <span class="nv">Sql</span><span class="p">},</span> <span class="p">_</span><span class="nv">From</span><span class="p">,</span> <span class="nl">#state</span><span class="p">{</span><span class="n">conn</span><span class="o">=</span><span class="nv">Conn</span><span class="p">}</span><span class="o">=</span><span class="nv">State</span><span class="p">)</span> <span class="o">-&gt;</span>
+    <span class="p">{</span><span class="n">reply</span><span class="p">,</span> <span class="nn">pgsql</span><span class="p">:</span><span class="n">squery</span><span class="p">(</span><span class="nv">Conn</span><span class="p">,</span> <span class="nv">Sql</span><span class="p">),</span> <span class="nv">State</span><span class="p">};</span>
+<span class="nf">handle_call</span><span class="p">({</span><span class="n">equery</span><span class="p">,</span> <span class="nv">Stmt</span><span class="p">,</span> <span class="nv">Params</span><span class="p">},</span> <span class="p">_</span><span class="nv">From</span><span class="p">,</span> <span class="nl">#state</span><span class="p">{</span><span class="n">conn</span><span class="o">=</span><span class="nv">Conn</span><span class="p">}</span><span class="o">=</span><span class="nv">State</span><span class="p">)</span> <span class="o">-&gt;</span>
+    <span class="p">{</span><span class="n">reply</span><span class="p">,</span> <span class="nn">pgsql</span><span class="p">:</span><span class="n">equery</span><span class="p">(</span><span class="nv">Conn</span><span class="p">,</span> <span class="nv">Stmt</span><span class="p">,</span> <span class="nv">Params</span><span class="p">),</span> <span class="nv">State</span><span class="p">};</span>
+<span class="nf">handle_call</span><span class="p">(_</span><span class="nv">Request</span><span class="p">,</span> <span class="p">_</span><span class="nv">From</span><span class="p">,</span> <span class="nv">State</span><span class="p">)</span> <span class="o">-&gt;</span>
+    <span class="p">{</span><span class="n">reply</span><span class="p">,</span> <span class="n">ok</span><span class="p">,</span> <span class="nv">State</span><span class="p">}.</span>
+
+<span class="nf">handle_cast</span><span class="p">(_</span><span class="nv">Msg</span><span class="p">,</span> <span class="nv">State</span><span class="p">)</span> <span class="o">-&gt;</span>
+    <span class="p">{</span><span class="n">noreply</span><span class="p">,</span> <span class="nv">State</span><span class="p">}.</span>
+
+<span class="nf">handle_info</span><span class="p">(</span><span class="n">stop</span><span class="p">,</span> <span class="nv">State</span><span class="p">)</span> <span class="o">-&gt;</span>
+    <span class="p">{</span><span class="n">stop</span><span class="p">,</span> <span class="n">shutdown</span><span class="p">,</span> <span class="nv">State</span><span class="p">};</span>
+<span class="nf">handle_info</span><span class="p">({</span><span class="n">'EXIT'</span><span class="p">,</span> <span class="p">_,</span> <span class="p">_},</span> <span class="nv">State</span><span class="p">)</span> <span class="o">-&gt;</span>
+    <span class="p">{</span><span class="n">stop</span><span class="p">,</span> <span class="n">shutdown</span><span class="p">,</span> <span class="nv">State</span><span class="p">};</span>
+<span class="nf">handle_info</span><span class="p">(_</span><span class="nv">Info</span><span class="p">,</span> <span class="nv">State</span><span class="p">)</span> <span class="o">-&gt;</span>
+    <span class="p">{</span><span class="n">noreply</span><span class="p">,</span> <span class="nv">State</span><span class="p">}.</span>
+
+<span class="nf">terminate</span><span class="p">(_</span><span class="nv">Reason</span><span class="p">,</span> <span class="nl">#state</span><span class="p">{</span><span class="n">conn</span><span class="o">=</span><span class="nv">Conn</span><span class="p">})</span> <span class="o">-&gt;</span>
+    <span class="nn">pgsql</span><span class="p">:</span><span class="n">close</span><span class="p">(</span><span class="nv">Conn</span><span class="p">),</span>
+    <span class="n">ok</span><span class="p">.</span>
+
+<span class="nf">code_change</span><span class="p">(_</span><span class="nv">OldVsn</span><span class="p">,</span> <span class="nv">State</span><span class="p">,</span> <span class="p">_</span><span class="nv">Extra</span><span class="p">)</span> <span class="o">-&gt;</span>
+    <span class="p">{</span><span class="n">ok</span><span class="p">,</span> <span class="nv">State</span><span class="p">}.</span>
+</pre>
+</div>
+
+
+<h1>Options</h1>
+
+<ul>
+<li>
+<code>name</code>: the pool name</li>
+<li>
+<code>worker_module</code>: the module that represents the workers</li>
+<li>
+<code>size</code>: maximum pool size</li>
+<li>
+<code>max_overflow</code>: maximum number of workers created if pool is empty</li>
+</ul><h1>Authors</h1>
+
+<ul>
+<li>Devin Torres (devinus) <a href="mailto:devin@devintorres.com">devin@devintorres.com</a>
+</li>
+<li>Andrew Thompson (Vagabond) <a href="mailto:andrew@hijacked.us">andrew@hijacked.us</a>
+</li>
+<li>Kurt Williams (onkel-dirtus) <a href="mailto:kurt.r.williams@gmail.com">kurt.r.williams@gmail.com</a>
+</li>
+</ul><h1>License</h1>
+
+<p>Poolboy is available in the public domain (see <code>UNLICENSE</code>).
+Poolboy is also optionally available under the Apache License (see <code>LICENSE</code>),
+meant especially for jurisdictions that do not recognize public domain works.</p>
+      </section>
+      <footer>
+        <p>Project maintained by <a href="https://github.com/devinus">devinus</a></p>
+        <p><small>Hosted on GitHub Pages &mdash; Theme by <a href="https://twitter.com/#!/michigangraham">mattgraham</a></small></p>
+      </footer>
+    </div>
+    <!--[if !IE]><script>fixScale(document);</script><!--<![endif]-->
+  </body>
+</html>
