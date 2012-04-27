@@ -249,7 +249,8 @@ handle_sync_event(_Event, _From, StateName, State) ->
 handle_info({'DOWN', Ref, _, _, _}, StateName, State) ->
     case ets:match(State#state.monitors, {'$1', Ref}) of
         [[Pid]] ->
-            true = exit(Pid, kill),
+            Sup = State#state.supervisor,
+            ok = supervisor:terminate_child(Sup, Pid),
             {next_state, StateName, State};
         [] ->
             {next_state, StateName, State}
