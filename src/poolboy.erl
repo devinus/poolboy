@@ -3,7 +3,7 @@
 -module(poolboy).
 -behaviour(gen_fsm).
 
--export([checkout/1, checkout/2, checkout/3, checkin/2,
+-export([checkout/1, checkout/2, checkout/3, checkin/2, transaction/2,
          child_spec/2, start_link/1, stop/1]).
 -export([init/1, ready/2, ready/3, overflow/2, overflow/3, full/2, full/3,
          handle_event/3, handle_sync_event/4, handle_info/3, terminate/3,
@@ -35,8 +35,18 @@ checkout(Pool, Block, Timeout) ->
     gen_fsm:sync_send_event(Pool, {checkout, Block, Timeout}, Timeout).
 
 -spec checkin(Pool :: node(), Worker :: pid()) -> ok.
-checkin(Pool, Worker) ->
+checkin(Pool, Worker) when is_pid(Worker) ->
     gen_fsm:send_event(Pool, {checkin, Worker}).
+
+-spec transaction(Pool :: node(), Fun :: fun((Worker :: pid()) -> any()))
+    -> any().
+transaction(Pool, Fun) ->
+    Worker = poolboy:checkout(Pool),
+    try
+        Fun(Worker)
+    after
+        ok = poolboy:checkin(Pool, Worker)
+    end.
 
 -spec child_spec(Pool :: node(), Args :: proplists:proplist()) ->
     supervisor:child_spec().
@@ -45,7 +55,7 @@ child_spec(Pool, Args) ->
      permanent, 5000, worker, [poolboy]}.
 
 -spec start_link(Args :: proplists:proplist()) -> {ok, pid()}.
-start_link(Args) ->
+start_link(Args)  ->
     case proplists:get_value(name, Args) of
         undefined ->
             gen_fsm:start_link(?MODULE, Args, []);
@@ -74,10 +84,10 @@ init([_ | Rest], State) ->
     init(Rest, State);
 init([], #state{size=Size, supervisor=Sup, max_overflow=MaxOverflow}=State) ->
     Workers = prepopulate(Size, Sup),
-    StartState = case {Size, MaxOverflow} of
-        {0, 0} -> full;
-        {0, _} -> overflow;
-        {_, _} -> ready
+    StartState = case Size of
+        Size when Size < 1, MaxOverflow < 1 -> full;
+        Size when Size < 1 -> overflow;
+        Size -> ready
     end,
     {ok, StartState, State#state{workers=Workers}}.
 
@@ -104,10 +114,10 @@ ready({checkout, Block, Timeout}, {FromPid, _}=From, State) ->
         {{value, Pid}, Left} ->
             Ref = erlang:monitor(process, FromPid),
             true = ets:insert(Monitors, {Pid, Ref}),
-            NextState = case {queue:len(Left), MaxOverflow} of
-                {0, 0} -> full;
-                {0, _} -> overflow;
-                {_, _} -> ready
+            NextState = case queue:is_empty(Left) of
+                true when MaxOverflow < 1 -> full;
+                true -> overflow;
+                false -> ready
             end,
             {reply, Pid, NextState, State#state{workers=Left}};
         {empty, Empty} when MaxOverflow > 0 ->
@@ -156,11 +166,11 @@ overflow({checkout, Block, Timeout}, From,
          #state{overflow=Overflow,
                 max_overflow=MaxOverflow}=State) when Overflow >= MaxOverflow ->
     case Block of
-        false ->
-            {reply, full, full, State};
-        Block ->
+        true ->
             Waiting = add_waiting(From, Timeout, State#state.waiting),
-            {next_state, full, State#state{waiting=Waiting}}
+            {next_state, full, State#state{waiting=Waiting}};
+        false ->
+            {reply, full, full, State}
     end;
 overflow({checkout, _Block, _Timeout}, {From, _}, State) ->
     #state{supervisor = Sup,
@@ -168,11 +178,12 @@ overflow({checkout, _Block, _Timeout}, {From, _}, State) ->
            max_overflow = MaxOverflow} = State,
     {Pid, Ref} = new_worker(Sup, From),
     true = ets:insert(State#state.monitors, {Pid, Ref}),
-    NextState = case Overflow+1 >= MaxOverflow of
+    NewOverflow = Overflow + 1,
+    NextState = case NewOverflow >= MaxOverflow of
         true  -> full;
         false -> overflow
     end,
-    {reply, Pid, NextState, State#state{overflow=Overflow+1}};
+    {reply, Pid, NextState, State#state{overflow=NewOverflow}};
 overflow(_Event, _From, State) ->
     {reply, ok, overflow, State}.
 
@@ -212,11 +223,11 @@ full({checkin, Pid}, State) ->
 full(_Event, State) ->
     {next_state, full, State}.
 
-full({checkout, false, _Timeout}, _From, State) ->
-    {reply, full, full, State};
-full({checkout, _Block, Timeout}, From, State) ->
+full({checkout, true, Timeout}, From, State) ->
     Waiting = add_waiting(From, Timeout, State#state.waiting),
     {next_state, full, State#state{waiting=Waiting}};
+full({checkout, false, _Timeout}, _From, State) ->
+    {reply, full, full, State};
 full(_Event, _From, State) ->
     {reply, ok, full, State}.
 
@@ -344,7 +355,7 @@ dismiss_worker(Sup, Pid) ->
     true = unlink(Pid),
     supervisor:terminate_child(Sup, Pid).
 
-prepopulate(0, _) ->
+prepopulate(N, _) when N < 1 ->
     queue:new();
 prepopulate(N, Sup) ->
     prepopulate(N, Sup, queue:new()).

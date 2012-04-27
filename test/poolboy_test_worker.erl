@@ -10,7 +10,6 @@ start_link(_Args) ->
     gen_server:start_link(?MODULE, [], []).
 
 init([]) ->
-    process_flag(trap_exit, true),
     {ok, undefined}.
 
 handle_call(die, _From, State) ->
@@ -21,8 +20,6 @@ handle_call(_Event, _From, State) ->
 handle_cast(_Event, State) ->
     {noreply, State}.
 
-handle_info({'EXIT', _, _}, State) ->
-    {stop, shutdown, State};
 handle_info(_Info, State) ->
     {noreply, State}.
 
