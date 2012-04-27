@@ -47,12 +47,6 @@ pool_test_() ->
             },
             {<<"Pool behaves on owner death">>,
                 fun owner_death/0
-            },
-            {<<"Pool worker init function called when workers when created">>,
-                fun worker_init_fun/0
-            },
-            {<<"Pool worker stop function called on workers when destroyed">>,
-                fun worker_stop_fun/0
             }
         ]
     }.
@@ -367,40 +361,4 @@ owner_death() ->
     ?assertEqual(5, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(5, length(?sync(Pid, get_all_workers))),
     ?assertEqual(0, length(?sync(Pid, get_all_monitors))),
-    ok = ?sync(Pid, stop).
-
-worker_init_fun() ->
-    Self = self(),
-    InitFun = fun(Worker) ->
-        Self ! worked,
-        {ok, Worker}
-    end,
-    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}},
-                                    {worker_module, poolboy_test_worker},
-                                    {init_fun, InitFun}]),
-    poolboy:checkout(Pid),
-    receive
-        worked -> ?assert(true)
-    after
-        1000 -> ?assert(false)
-    end,
-    ok = ?sync(Pid, stop).
-
-worker_stop_fun() ->
-    Self = self(),
-    StopFun = fun(Worker) ->
-        Self ! worked,
-        Worker ! stop
-    end,
-    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}},
-                                    {worker_module, poolboy_test_worker},
-                                    {stop_fun, StopFun},
-                                    {size, 0}, {max_overflow, 1}]),
-    Worker = poolboy:checkout(Pid),
-    checkin_worker(Pid, Worker),
-    receive
-        worked -> ?assert(true)
-    after
-        1000 -> ?assert(false)
-    end,
     ok = ?sync(Pid, stop).

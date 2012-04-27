@@ -21,8 +21,6 @@ handle_call(_Event, _From, State) ->
 handle_cast(_Event, State) ->
     {noreply, State}.
 
-handle_info(stop, State) ->
-    {stop, shutdown, State};
 handle_info({'EXIT', _, _}, State) ->
     {stop, shutdown, State};
 handle_info(_Info, State) ->
