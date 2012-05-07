@@ -272,6 +272,7 @@ handle_info({'EXIT', Pid, Reason}, StateName, State) ->
            waiting = Waiting,
            monitors = Monitors,
            max_overflow = MaxOverflow} = State,
+    supervisor:terminate_child(Sup, Pid),
     case ets:lookup(Monitors, Pid) of
         [{Pid, Ref}] ->
             true = erlang:demonitor(Ref),
