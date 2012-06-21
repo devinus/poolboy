@@ -150,6 +150,8 @@ Options
 - `worker_module`: the module that represents the workers
 - `size`: maximum pool size
 - `max_overflow`: maximum number of workers created if pool is empty
+- `monitor`: boolean (true, false). Tells poolboy to monitor the process that checked-out a worker (and replace the worker if
+  such process dies). Monitoring is enabled by default
 
 Authors
 -------

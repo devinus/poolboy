@@ -18,7 +18,8 @@
     monitors :: ets:tid(),
     size = 5 :: non_neg_integer(),
     overflow = 0 :: non_neg_integer(),
-    max_overflow = 10 :: non_neg_integer()
+    max_overflow = 10 :: non_neg_integer(),
+    monitor = true :: true | false
 }).
 
 -spec checkout(Pool :: node()) -> pid().
@@ -80,6 +81,8 @@ init([{size, Size} | Rest], State) when is_integer(Size) ->
     init(Rest, State#state{size=Size});
 init([{max_overflow, MaxOverflow} | Rest], State) when is_integer(MaxOverflow) ->
     init(Rest, State#state{max_overflow=MaxOverflow});
+init([{monitor, Monitor} | Rest], State) when Monitor =:= true orelse Monitor =:= false ->
+    init(Rest, State#state{monitor=Monitor});
 init([_ | Rest], State) ->
     init(Rest, State);
 init([], #state{size=Size, supervisor=Sup, max_overflow=MaxOverflow}=State) ->
@@ -95,7 +98,7 @@ ready({checkin, Pid}, State) ->
     Monitors = State#state.monitors,
     case ets:lookup(Monitors, Pid) of
         [{Pid, Ref}] ->
-            true = erlang:demonitor(Ref),
+            true = demonitor_(Ref),
             true = ets:delete(Monitors, Pid),
             Workers = queue:in(Pid, State#state.workers),
             {next_state, ready, State#state{workers=Workers}};
@@ -109,10 +112,11 @@ ready({checkout, Block, Timeout}, {FromPid, _}=From, State) ->
     #state{supervisor = Sup,
            workers = Workers,
            monitors = Monitors,
-           max_overflow = MaxOverflow} = State,
+           max_overflow = MaxOverflow,
+           monitor = Monitor} = State,
     case queue:out(Workers) of
         {{value, Pid}, Left} ->
-            Ref = erlang:monitor(process, FromPid),
+            Ref = monitor_(Monitor, FromPid),
             true = ets:insert(Monitors, {Pid, Ref}),
             NextState = case queue:is_empty(Left) of
                 true when MaxOverflow < 1 -> full;
@@ -121,7 +125,7 @@ ready({checkout, Block, Timeout}, {FromPid, _}=From, State) ->
             end,
             {reply, Pid, NextState, State#state{workers=Left}};
         {empty, Empty} when MaxOverflow > 0 ->
-            {Pid, Ref} = new_worker(Sup, FromPid),
+            {Pid, Ref} = new_worker(Sup, FromPid, Monitor),
             true = ets:insert(Monitors, {Pid, Ref}),
             {reply, Pid, overflow, State#state{workers=Empty, overflow=1}};
         {empty, Empty} when Block =:= false ->
@@ -137,7 +141,7 @@ overflow({checkin, Pid}, #state{overflow=0}=State) ->
     Monitors = State#state.monitors,
     case ets:lookup(Monitors, Pid) of
         [{Pid, Ref}] ->
-            true = erlang:demonitor(Ref),
+            true = demonitor_(Ref),
             true = ets:delete(Monitors, Pid),
             NextState = case State#state.size > 0 of
                 true  -> ready;
@@ -153,7 +157,7 @@ overflow({checkin, Pid}, State) ->
     case ets:lookup(Monitors, Pid) of
         [{Pid, Ref}] ->
             ok = dismiss_worker(Sup, Pid),
-            true = erlang:demonitor(Ref),
+            true = demonitor_(Ref),
             true = ets:delete(Monitors, Pid),
             {next_state, overflow, State#state{overflow=Overflow-1}};
         [] ->
@@ -175,8 +179,9 @@ overflow({checkout, Block, Timeout}, From,
 overflow({checkout, _Block, _Timeout}, {From, _}, State) ->
     #state{supervisor = Sup,
            overflow = Overflow,
-           max_overflow = MaxOverflow} = State,
-    {Pid, Ref} = new_worker(Sup, From),
+           max_overflow = MaxOverflow,
+           monitor = Monitor} = State,
+    {Pid, Ref} = new_worker(Sup, From, Monitor),
     true = ets:insert(State#state.monitors, {Pid, Ref}),
     NewOverflow = Overflow + 1,
     NextState = case NewOverflow >= MaxOverflow of
@@ -192,16 +197,17 @@ full({checkin, Pid}, State) ->
            waiting = Waiting,
            monitors = Monitors,
            max_overflow = MaxOverflow,
-           overflow = Overflow} = State,
+           overflow = Overflow,
+           monitor = Monitor} = State,
     case ets:lookup(Monitors, Pid) of
         [{Pid, Ref}] ->
-            true = erlang:demonitor(Ref),
+            true = demonitor_(Ref),
             true = ets:delete(Monitors, Pid),
             case queue:out(Waiting) of
                 {{value, {{FromPid, _}=From, Timeout, StartTime}}, Left} ->
                     case wait_valid(StartTime, Timeout) of
                         true ->
-                            Ref1 = erlang:monitor(process, FromPid),
+                            Ref1 = monitor_(Monitor, FromPid),
                             true = ets:insert(Monitors, {Pid, Ref1}),
                             gen_fsm:reply(From, Pid),
                             {next_state, full, State#state{waiting=Left}};
@@ -271,10 +277,11 @@ handle_info({'EXIT', Pid, Reason}, StateName, State) ->
            overflow = Overflow,
            waiting = Waiting,
            monitors = Monitors,
-           max_overflow = MaxOverflow} = State,
+           max_overflow = MaxOverflow,
+           monitor = Monitor} = State,
     case ets:lookup(Monitors, Pid) of
         [{Pid, Ref}] ->
-            true = erlang:demonitor(Ref),
+            true = demonitor_(Ref),
             true = ets:delete(Monitors, Pid),
             case StateName of
                 ready ->
@@ -290,7 +297,7 @@ handle_info({'EXIT', Pid, Reason}, StateName, State) ->
                         {{value, {{FromPid, _}=From, Timeout, StartTime}}, LeftWaiting} ->
                             case wait_valid(StartTime, Timeout) of
                                 true ->
-                                    MonitorRef = erlang:monitor(process, FromPid),
+                                    MonitorRef = monitor_(Monitor, FromPid),
                                     NewWorker = new_worker(Sup),
                                     true = ets:insert(Monitors, {NewWorker, MonitorRef}),
                                     gen_fsm:reply(From, NewWorker),
@@ -308,7 +315,7 @@ handle_info({'EXIT', Pid, Reason}, StateName, State) ->
                         {{value, {{FromPid, _}=From, Timeout, StartTime}}, LeftWaiting} ->
                             case wait_valid(StartTime, Timeout) of
                                 true ->
-                                    MonitorRef = erlang:monitor(process, FromPid),
+                                    MonitorRef = monitor_(Monitor, FromPid),
                                     NewWorker = new_worker(Sup),
                                     true = ets:insert(Monitors, {NewWorker, MonitorRef}),
                                     gen_fsm:reply(From, NewWorker),
@@ -346,9 +353,9 @@ new_worker(Sup) ->
     true = link(Pid),
     Pid.
 
-new_worker(Sup, FromPid) ->
+new_worker(Sup, FromPid, Monitor) ->
     Pid = new_worker(Sup),
-    Ref = erlang:monitor(process, FromPid),
+    Ref = monitor_(Monitor, FromPid),
     {Pid, Ref}.
 
 dismiss_worker(Sup, Pid) ->
@@ -373,3 +380,13 @@ wait_valid(infinity, _) ->
 wait_valid(StartTime, Timeout) ->
     Waited = timer:now_diff(os:timestamp(), StartTime),
     (Waited div 1000) < Timeout.
+
+monitor_(true, Pid) ->
+    erlang:monitor(process, Pid);
+monitor_(_, _) ->
+    undefined.
+
+demonitor_(undefined) ->
+    true;
+demonitor_(Ref) ->
+    erlang:demonitor(Ref).

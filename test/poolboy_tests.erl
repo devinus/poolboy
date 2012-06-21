@@ -50,7 +50,11 @@ pool_test_() ->
             },
             {<<"Worker checked-in after an exception in a transaction">>,
                 fun checkin_after_exception_in_transaction/0
+            },
+            {<<"Worker consumer monitoring">>,
+                fun worker_consumer_monitoring/0
             }
+
         ]
     }.
 
@@ -363,7 +367,50 @@ checkin_after_exception_in_transaction() ->
     ?assertEqual(2, length(?sync(Pool, get_avail_workers))),
     ok = ?sync(Pool, stop).
 
+worker_consumer_monitoring() ->
+	%% check deactivation of worker consumer monitoring
+	%%	. when the consumer process dies and is monitored, a new worker is instanciated to replaced the one "lost"
+	%%	. when the consumer process dies and not monitored, no new worker is instanciated
+    {ok, Pool} = new_pool(5, 0),
+    ?assertEqual(5, length(?sync(Pool, get_avail_workers))),
+
+    Self = self(),
+    spawn(fun() ->
+        _Worker = poolboy:checkout(Pool),
+        Self ! got_worker
+    end),
+
+    receive
+        got_worker -> ok
+    end,
+    timer:sleep(1000),
+    ?assertEqual(5, length(?sync(Pool, get_avail_workers))),
+    ok = ?sync(Pool, stop),
+
+
+    {ok, Pool2} = new_pool(5, 0, false),
+    ?assertEqual(5, length(?sync(Pool2, get_avail_workers))),
+
+	spawn(fun() ->
+        _Worker = poolboy:checkout(Pool2),
+        Self ! got_worker
+    end),
+
+    receive
+        got_worker -> ok
+    end,
+    timer:sleep(1000),
+    ?assertEqual(4, length(?sync(Pool2, get_avail_workers))),
+    ok = ?sync(Pool2, stop).
+
 new_pool(Size, MaxOverflow) ->
     poolboy:start_link([{name, {local, poolboy_test}},
                         {worker_module, poolboy_test_worker},
                         {size, Size}, {max_overflow, MaxOverflow}]).
+
+new_pool(Size, MaxOverflow, Monitor) ->
+    poolboy:start_link([{name, {local, poolboy_test}},
+                        {worker_module, poolboy_test_worker},
+                        {size, Size}, {max_overflow, MaxOverflow},
+                        {monitor, Monitor}
+    ]).
