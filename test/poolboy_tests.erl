@@ -50,6 +50,9 @@ pool_test_() ->
             },
             {<<"Worker checked-in after an exception in a transaction">>,
                 fun checkin_after_exception_in_transaction/0
+            },
+            {<<"Pool returns status">>,
+                fun pool_returns_status/0
             }
         ]
     }.
@@ -361,6 +364,11 @@ checkin_after_exception_in_transaction() ->
         throw:it_on_the_ground -> ok
     end,
     ?assertEqual(2, length(?sync(Pool, get_avail_workers))),
+    ok = ?sync(Pool, stop).
+
+pool_returns_status() ->
+    {ok, Pool} = new_pool(2, 0),
+    ?assertEqual({ready, 2, 0, 0}, poolboy:status(Pool)),
     ok = ?sync(Pool, stop).
 
 new_pool(Size, MaxOverflow) ->
