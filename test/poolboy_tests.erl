@@ -48,11 +48,11 @@ pool_test_() ->
             {<<"Pool behaves on owner death">>,
                 fun owner_death/0
             },
-            {<<"Pool worker init function called when workers when created">>,
-                fun worker_init_fun/0
+            {<<"Worker checked-in after an exception in a transaction">>,
+                fun checkin_after_exception_in_transaction/0
             },
-            {<<"Pool worker stop function called on workers when destroyed">>,
-                fun worker_stop_fun/0
+            {<<"Pool returns status">>,
+                fun pool_returns_status/0
             }
         ]
     }.
@@ -75,9 +75,7 @@ checkin_worker(Pid, Worker) ->
 
 pool_startup() ->
     %% Check basic pool operation.
-    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}},
-                                    {worker_module, poolboy_test_worker},
-                                    {size, 10}, {max_overflow, 5}]),
+    {ok, Pid} = new_pool(10, 5),
     ?assertEqual(10, length(?sync(Pid, get_avail_workers))),
     poolboy:checkout(Pid),
     ?assertEqual(9, length(?sync(Pid, get_avail_workers))),
@@ -90,9 +88,7 @@ pool_startup() ->
 
 pool_overflow() ->
     %% Check that the pool overflows properly.
-    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}},
-                                    {worker_module, poolboy_test_worker},
-                                    {size, 5}, {max_overflow, 5}]),
+    {ok, Pid} = new_pool(5, 5),
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 6)],
     ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(7, length(?sync(Pid, get_all_workers))),
@@ -118,9 +114,7 @@ pool_overflow() ->
 pool_empty() ->
     %% Checks that the the pool handles the empty condition correctly when
     %% overflow is enabled.
-    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}},
-                                    {worker_module, poolboy_test_worker},
-                                    {size, 5}, {max_overflow, 2}]),
+    {ok, Pid} = new_pool(5, 2),
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 6)],
     ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(7, length(?sync(Pid, get_all_workers))),
@@ -166,9 +160,7 @@ pool_empty() ->
 pool_empty_no_overflow() ->
     %% Checks the pool handles the empty condition properly when overflow is
     %% disabled.
-    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}},
-                                    {worker_module, poolboy_test_worker},
-                                    {size, 5}, {max_overflow, 0}]),
+    {ok, Pid} = new_pool(5, 0),
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 4)],
     ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(5, length(?sync(Pid, get_all_workers))),
@@ -210,9 +202,7 @@ pool_empty_no_overflow() ->
 worker_death() ->
     %% Check that dead workers are only restarted when the pool is not full
     %% and the overflow count is 0. Meaning, don't restart overflow workers.
-    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}},
-                                    {worker_module, poolboy_test_worker},
-                                    {size, 5}, {max_overflow, 2}]),
+    {ok, Pid} = new_pool(5, 2),
     Worker = poolboy:checkout(Pid),
     kill_worker(Worker),
     ?assertEqual(5, length(?sync(Pid, get_avail_workers))),
@@ -233,9 +223,7 @@ worker_death_while_full() ->
     %% Check that if a worker dies while the pool is full and there is a
     %% queued checkout, a new worker is started and the checkout serviced.
     %% If there are no queued checkouts, a new worker is not started.
-    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}},
-                                    {worker_module, poolboy_test_worker},
-                                    {size, 5}, {max_overflow, 2}]),
+    {ok, Pid} = new_pool(5, 2),
     Worker = poolboy:checkout(Pid),
     kill_worker(Worker),
     ?assertEqual(5, length(?sync(Pid, get_avail_workers))),
@@ -276,9 +264,7 @@ worker_death_while_full_no_overflow() ->
     %% Check that if a worker dies while the pool is full and there's no
     %% overflow, a new worker is started unconditionally and any queued
     %% checkouts are serviced.
-    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}},
-                                    {worker_module, poolboy_test_worker},
-                                    {size, 5}, {max_overflow, 0}]),
+    {ok, Pid} = new_pool(5, 0),
     Worker = poolboy:checkout(Pid),
     kill_worker(Worker),
     ?assertEqual(5, length(?sync(Pid, get_avail_workers))),
@@ -320,9 +306,7 @@ worker_death_while_full_no_overflow() ->
 pool_full_nonblocking_no_overflow() ->
     %% Check that when the pool is full, checkouts return 'full' when the
     %% option to use non-blocking checkouts is used.
-    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}},
-                                    {worker_module, poolboy_test_worker},
-                                    {size, 5}, {max_overflow, 0}]),
+    {ok, Pid} = new_pool(5, 0),
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 4)],
     ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(5, length(?sync(Pid, get_all_workers))),
@@ -337,9 +321,7 @@ pool_full_nonblocking_no_overflow() ->
 pool_full_nonblocking() ->
     %% Check that when the pool is full, checkouts return 'full' when the
     %% option to use non-blocking checkouts is used.
-    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}},
-                                    {worker_module, poolboy_test_worker},
-                                    {size, 5}, {max_overflow, 5}]),
+    {ok, Pid} = new_pool(5, 5),
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 9)],
     ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(10, length(?sync(Pid, get_all_workers))),
@@ -356,9 +338,7 @@ pool_full_nonblocking() ->
 owner_death() ->
     %% Check that a dead owner (a process that dies with a worker checked out)
     %% causes the pool to dismiss the worker and prune the state space.
-    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}},
-                                    {worker_module, poolboy_test_worker},
-                                    {size, 5}, {max_overflow, 5}]),
+    {ok, Pid} = new_pool(5, 5),
     spawn(fun() ->
         poolboy:checkout(Pid),
         receive after 500 -> exit(normal) end
@@ -369,38 +349,29 @@ owner_death() ->
     ?assertEqual(0, length(?sync(Pid, get_all_monitors))),
     ok = ?sync(Pid, stop).
 
-worker_init_fun() ->
-    Self = self(),
-    InitFun = fun(Worker) ->
-        Self ! worked,
-        {ok, Worker}
+checkin_after_exception_in_transaction() ->
+    {ok, Pool} = new_pool(2, 0),
+    ?assertEqual(2, length(?sync(Pool, get_avail_workers))),
+    Tx = fun(Worker) ->
+        ?assert(is_pid(Worker)),
+        ?assertEqual(1, length(?sync(Pool, get_avail_workers))),
+        throw(it_on_the_ground),
+        ?assert(false)
     end,
-    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}},
-                                    {worker_module, poolboy_test_worker},
-                                    {init_fun, InitFun}]),
-    poolboy:checkout(Pid),
-    receive
-        worked -> ?assert(true)
-    after
-        1000 -> ?assert(false)
+    try
+        poolboy:transaction(Pool, Tx)
+    catch
+        throw:it_on_the_ground -> ok
     end,
-    ok = ?sync(Pid, stop).
+    ?assertEqual(2, length(?sync(Pool, get_avail_workers))),
+    ok = ?sync(Pool, stop).
 
-worker_stop_fun() ->
-    Self = self(),
-    StopFun = fun(Worker) ->
-        Self ! worked,
-        Worker ! stop
-    end,
-    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}},
-                                    {worker_module, poolboy_test_worker},
-                                    {stop_fun, StopFun},
-                                    {size, 0}, {max_overflow, 1}]),
-    Worker = poolboy:checkout(Pid),
-    checkin_worker(Pid, Worker),
-    receive
-        worked -> ?assert(true)
-    after
-        1000 -> ?assert(false)
-    end,
-    ok = ?sync(Pid, stop).
+pool_returns_status() ->
+    {ok, Pool} = new_pool(2, 0),
+    ?assertEqual({ready, 2, 0, 0}, poolboy:status(Pool)),
+    ok = ?sync(Pool, stop).
+
+new_pool(Size, MaxOverflow) ->
+    poolboy:start_link([{name, {local, poolboy_test}},
+                        {worker_module, poolboy_test_worker},
+                        {size, Size}, {max_overflow, MaxOverflow}]).

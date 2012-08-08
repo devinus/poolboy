@@ -6,15 +6,20 @@ Poolboy - A hunky Erlang worker pool factory
 Usage
 -----
 
-```erlang
-Worker = poolboy:checkout(PoolName),
-Reply = gen_server:call(Worker, WorkerFun),
-poolboy:checkin(PoolName, Worker),
-Reply.
+```erl-sh
+1> Worker = poolboy:checkout(PoolName).
+<0.9001.0>
+2> gen_server:call(Worker, Request).
+ok
+3> poolboy:checkin(PoolName, Worker).
+ok
 ```
 
-Example Application
--------------------
+Example
+-------
+
+This is an example application showcasing database connection pools using
+Poolboy and Will Glozer's [epgsql](https://github.com/wg/epgsql).
 
 ### example.app
 
@@ -56,14 +61,21 @@ Example Application
 -behaviour(application).
 -behaviour(supervisor).
 
--export([start/0, stop/0, start/2, stop/1, init/1, squery/2, equery/3]).
+-export([start/0, stop/0, squery/2, equery/3]).
+-export([start/2, stop/1]).
+-export([init/1]).
 
-start() -> application:start(?MODULE).
-stop()  -> application:stop(?MODULE).
+start() ->
+    application:start(?MODULE).
+
+stop() ->
+    application:stop(?MODULE).
 
 start(_Type, _Args) ->
     supervisor:start_link({local, example_sup}, ?MODULE, []).
-stop(_State) -> ok.
+
+stop(_State) ->
+    ok.
 
 init([]) ->
     {ok, Pools} = application:get_env(example, pools),
@@ -71,22 +83,19 @@ init([]) ->
         Args = [{name, {local, PoolName}},
                 {worker_module, example_worker}]
                 ++ PoolConfig,
-        {PoolName, {poolboy, start_link, [Args]},
-                    permanent, 5000, worker, [poolboy]}
+        poolboy:child_spec(PoolName, Args)
     end, Pools),
     {ok, {{one_for_one, 10, 10}, PoolSpecs}}.
 
 squery(PoolName, Sql) ->
-    Worker = poolboy:checkout(PoolName),
-    Reply = gen_server:call(Worker, {squery, Sql}),
-    poolboy:checkin(PoolName, Worker),
-    Reply.
+    poolboy:transaction(PoolName, fun(Worker) ->
+        gen_server:call(Worker, {squery, Sql})
+    end).
 
 equery(PoolName, Stmt, Params) ->
-    Worker = poolboy:checkout(PoolName),
-    Reply = gen_server:call(Worker, {equery, Stmt, Params}),
-    poolboy:checkin(PoolName, Worker),
-    Reply.
+    poolboy:transaction(PoolName, fun(Worker) ->
+        gen_server:call(Worker, {equery, Stmt, Params})
+    end).
 ```
 
 ### example_worker.erl
@@ -94,17 +103,18 @@ equery(PoolName, Stmt, Params) ->
 ```erlang
 -module(example_worker).
 -behaviour(gen_server).
+-behaviour(poolboy_worker).
 
--export([start_link/1, stop/0, init/1, handle_call/3, handle_cast/2,
-         handle_info/2, terminate/2, code_change/3]).
+-export([start_link/1]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
+         code_change/3]).
 
 -record(state, {conn}).
 
-start_link(Args) -> gen_server:start_link(?MODULE, Args, []).
-stop() -> gen_server:cast(?MODULE, stop).
+start_link(Args) ->
+    gen_server:start_link(?MODULE, Args, []).
 
 init(Args) ->
-    process_flag(trap_exit, true),
     Hostname = proplists:get_value(hostname, Args),
     Database = proplists:get_value(database, Args),
     Username = proplists:get_value(username, Args),
@@ -124,15 +134,11 @@ handle_call(_Request, _From, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info(stop, State) ->
-    {stop, shutdown, State};
-handle_info({'EXIT', _, _}, State) ->
-    {stop, shutdown, State};
 handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(_Reason, #state{conn=Conn}) ->
-    pgsql:close(Conn),
+    ok = pgsql:close(Conn),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
