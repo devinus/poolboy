@@ -1,6 +1,8 @@
 Poolboy - A hunky Erlang worker pool factory
 ============================================
 
+[![Build Status](https://secure.travis-ci.org/devinus/poolboy.png?branch=master)](http://travis-ci.org/devinus/poolboy)
+
 Usage
 -----
 
