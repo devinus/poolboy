@@ -110,6 +110,8 @@ precondition(S, {call, _, kill_worker, [Pid]}) ->
     lists:member(Pid, S#state.checked_out);
 precondition(S,{call,_,kill_idle_worker,[_Pool]}) ->
     length(S#state.checked_out) < S#state.size;
+precondition(S,{call,_,checkin,[_Pool, Pid]}) ->
+    lists:member(Pid, S#state.checked_out);
 precondition(_S,{call,_,_,_}) ->
     true.
 
@@ -140,19 +142,44 @@ precondition(_S,{call,_,_,_}) ->
 postcondition(S,{call,_,checkout_block,[_Pool]},R) ->
     case R of
         {{'EXIT', {timeout, _}}, _} ->
-            length(S#state.checked_out) >= S#state.size + S#state.max_overflow;
+            case length(S#state.checked_out) >= S#state.size + S#state.max_overflow of
+                true ->
+                    true;
+                _ ->
+                    {checkout_block, R}
+            end;
         _ ->
-            length(S#state.checked_out) < S#state.size + S#state.max_overflow
+            case length(S#state.checked_out) < S#state.size + S#state.max_overflow of
+                true ->
+                    true;
+                _ ->
+                    {checkout_block, R}
+            end
     end;
 postcondition(S,{call,_,checkout_nonblock,[_Pool]},R) ->
     case R of
         {full, _} ->
-            length(S#state.checked_out) >= S#state.size + S#state.max_overflow;
+            case length(S#state.checked_out) >= S#state.size + S#state.max_overflow of
+                true ->
+                    true;
+                _ ->
+                    {checkout_nonblock, R}
+            end;
         _ ->
-            length(S#state.checked_out) < S#state.size + S#state.max_overflow
+            case length(S#state.checked_out) < S#state.size + S#state.max_overflow of
+                true ->
+                    true;
+                _ ->
+                    {checkout_block, R}
+            end
     end;
 postcondition(_S, {call,_,checkin,_}, R) ->
-    R == ok;
+    case R of
+        ok ->
+            true;
+        _ ->
+            {checkin, R}
+    end;
 postcondition(_S,{call,_,_,_},_R) ->
     true.
 
@@ -201,7 +228,7 @@ prop_sequential() ->
                             {H,S,Res} = run_commands(?MODULE,Cmds),
                             catch(stop_poolboy(whereis(poolboy_eqc))),
                             ?WHENFAIL(io:format("History: ~p\nState: ~p\nRes: ~p\n~p\n",
-                                    [H,S,Res, zip(tl(Cmds), [Y || {_, Y} <- H])]),
+                                    [H,S,Res, zip(Cmds, [Y || {_, Y} <- H])]),
                                 Res == ok)
                     end)))).
 
