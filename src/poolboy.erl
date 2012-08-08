@@ -4,7 +4,7 @@
 -behaviour(gen_fsm).
 
 -export([checkout/1, checkout/2, checkout/3, checkin/2, transaction/2,
-         child_spec/2, start_link/1, stop/1]).
+         child_spec/2, start_link/1, stop/1, status/1]).
 -export([init/1, ready/2, ready/3, overflow/2, overflow/3, full/2, full/3,
          handle_event/3, handle_sync_event/4, handle_info/3, terminate/3,
          code_change/4]).
@@ -66,6 +66,10 @@ start_link(Args)  ->
 -spec stop(Pool :: node()) -> ok.
 stop(Pool) ->
     gen_fsm:sync_send_all_state_event(Pool, stop).
+
+-spec status(Pool :: node()) -> {state, integer(), integer(), integer()}.
+status(Pool) ->
+    gen_fsm:sync_send_all_state_event(Pool, status).
 
 init(Args) ->
     process_flag(trap_exit, true),
