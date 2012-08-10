@@ -4,7 +4,8 @@
 -behaviour(gen_fsm).
 
 -export([checkout/1, checkout/2, checkout/3, checkin/2, transaction/2,
-         child_spec/2, start_link/1, stop/1, status/1]).
+         child_spec/2, child_spec/3, start_link/1, start_link/2, stop/1,
+         status/1]).
 -export([init/1, ready/2, ready/3, overflow/2, overflow/3, full/2, full/3,
          handle_event/3, handle_sync_event/4, handle_info/3, terminate/3,
          code_change/4]).
@@ -48,45 +49,59 @@ transaction(Pool, Fun) ->
         ok = poolboy:checkin(Pool, Worker)
     end.
 
--spec child_spec(Pool :: node(), Args :: proplists:proplist()) ->
-    supervisor:child_spec().
-child_spec(Pool, Args) ->
-    {Pool, {poolboy, start_link, [Args]},
+-spec child_spec(Pool :: node(), PoolArgs :: proplists:proplist())
+    -> supervisor:child_spec().
+child_spec(Pool, PoolArgs) ->
+    child_spec(Pool, PoolArgs, []).
+
+-spec child_spec(Pool :: node(),
+                 PoolArgs :: proplists:proplist(),
+                 WorkerArgs :: proplists:proplist())
+    -> supervisor:child_spec().
+child_spec(Pool, PoolArgs, WorkerArgs) ->
+    {Pool, {poolboy, start_link, [PoolArgs, WorkerArgs]},
      permanent, 5000, worker, [poolboy]}.
 
--spec start_link(Args :: proplists:proplist()) -> {ok, pid()}.
-start_link(Args)  ->
-    case proplists:get_value(name, Args) of
+-spec start_link(PoolArgs :: proplists:proplist())
+    -> {ok, pid()}.
+start_link(PoolArgs)  ->
+    start_link(PoolArgs, []).
+
+-spec start_link(PoolArgs :: proplists:proplist(),
+                 WorkerArgs:: proplists:proplist())
+    -> {ok, pid()}.
+start_link(PoolArgs, WorkerArgs)  ->
+    case proplists:get_value(name, PoolArgs) of
         undefined ->
-            gen_fsm:start_link(?MODULE, Args, []);
+            gen_fsm:start_link(?MODULE, {PoolArgs, WorkerArgs}, []);
         Name ->
-            gen_fsm:start_link(Name, ?MODULE, Args, [])
+            gen_fsm:start_link(Name, ?MODULE, {PoolArgs, WorkerArgs}, [])
     end.
 
 -spec stop(Pool :: node()) -> ok.
 stop(Pool) ->
     gen_fsm:sync_send_all_state_event(Pool, stop).
 
--spec status(Pool :: node()) -> {state, integer(), integer(), integer()}.
+-spec status(Pool :: node()) -> {atom(), integer(), integer(), integer()}.
 status(Pool) ->
     gen_fsm:sync_send_all_state_event(Pool, status).
 
-init(Args) ->
+init({PoolArgs, WorkerArgs}) ->
     process_flag(trap_exit, true),
     Waiting = queue:new(),
     Monitors = ets:new(monitors, [private]),
-    init(Args, Args, #state{waiting=Waiting, monitors=Monitors}).
+    init(PoolArgs, WorkerArgs, #state{waiting=Waiting, monitors=Monitors}).
 
-init([{worker_module, Mod} | Rest], Args, State) when is_atom(Mod) ->
-    {ok, Sup} = poolboy_sup:start_link(Mod, Args),
-    init(Rest, Args, State#state{supervisor=Sup});
-init([{size, Size} | Rest], Args, State) when is_integer(Size) ->
-    init(Rest, Args, State#state{size=Size});
-init([{max_overflow, MaxOverflow} | Rest], Args, State) when is_integer(MaxOverflow) ->
-    init(Rest, Args, State#state{max_overflow=MaxOverflow});
-init([_ | Rest], Args, State) ->
-    init(Rest, Args, State);
-init([], _Args, #state{size=Size, supervisor=Sup, max_overflow=MaxOverflow}=State) ->
+init([{worker_module, Mod} | Rest], WorkerArgs, State) when is_atom(Mod) ->
+    {ok, Sup} = poolboy_sup:start_link(Mod, WorkerArgs),
+    init(Rest, WorkerArgs, State#state{supervisor=Sup});
+init([{size, Size} | Rest], WorkerArgs, State) when is_integer(Size) ->
+    init(Rest, WorkerArgs, State#state{size=Size});
+init([{max_overflow, MaxOverflow} | Rest], WorkerArgs, State) when is_integer(MaxOverflow) ->
+    init(Rest, WorkerArgs, State#state{max_overflow=MaxOverflow});
+init([_ | Rest], WorkerArgs, State) ->
+	init(Rest, WorkerArgs, State);
+init([], _WorkerArgs, #state{size=Size, supervisor=Sup, max_overflow=MaxOverflow}=State) ->
     Workers = prepopulate(Size, Sup),
     StartState = case Size of
         Size when Size < 1, MaxOverflow < 1 -> full;
