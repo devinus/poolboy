@@ -4,8 +4,8 @@
 -behaviour(gen_fsm).
 
 -export([checkout/1, checkout/2, checkout/3, checkin/2, transaction/2,
-         child_spec/2, child_spec/3, start_link/1, start_link/2, stop/1,
-         status/1]).
+         child_spec/2, child_spec/3, start/1, start/2, start_link/1,
+		 start_link/2, stop/1, status/1]).
 -export([init/1, ready/2, ready/3, overflow/2, overflow/3, full/2, full/3,
          handle_event/3, handle_sync_event/4, handle_info/3, terminate/3,
          code_change/4]).
@@ -62,6 +62,17 @@ child_spec(Pool, PoolArgs, WorkerArgs) ->
     {Pool, {poolboy, start_link, [PoolArgs, WorkerArgs]},
      permanent, 5000, worker, [poolboy]}.
 
+-spec start(PoolArgs :: proplists:proplist())
+	-> {ok, pid()}.
+start(PoolArgs) ->
+	start(PoolArgs, []).
+
+-spec start(PoolArgs :: proplists:proplist(),
+			WorkerArgs:: proplists:proplist())
+    -> {ok, pid()}.
+start(PoolArgs, WorkerArgs) ->
+	start_pool(start, PoolArgs, WorkerArgs).
+
 -spec start_link(PoolArgs :: proplists:proplist())
     -> {ok, pid()}.
 start_link(PoolArgs)  ->
@@ -71,12 +82,7 @@ start_link(PoolArgs)  ->
                  WorkerArgs:: proplists:proplist())
     -> {ok, pid()}.
 start_link(PoolArgs, WorkerArgs)  ->
-    case proplists:get_value(name, PoolArgs) of
-        undefined ->
-            gen_fsm:start_link(?MODULE, {PoolArgs, WorkerArgs}, []);
-        Name ->
-            gen_fsm:start_link(Name, ?MODULE, {PoolArgs, WorkerArgs}, [])
-    end.
+    start_pool(start_link, PoolArgs, WorkerArgs).
 
 -spec stop(Pool :: node()) -> ok.
 stop(Pool) ->
@@ -288,6 +294,14 @@ terminate(_Reason, _StateName, _State) ->
 code_change(_OldVsn, StateName, State, _Extra) ->
     {ok, StateName, State}.
 
+start_pool(StartFun, PoolArgs, WorkerArgs) ->
+    case proplists:get_value(name, PoolArgs) of
+        undefined ->
+            gen_fsm:StartFun(?MODULE, {PoolArgs, WorkerArgs}, []);
+        Name ->
+            gen_fsm:StartFun(Name, ?MODULE, {PoolArgs, WorkerArgs}, [])
+    end.
+
 new_worker(Sup) ->
     {ok, Pid} = supervisor:start_child(Sup, []),
     true = link(Pid),
@@ -302,12 +316,12 @@ dismiss_worker(Sup, Pid) ->
     true = unlink(Pid),
     supervisor:terminate_child(Sup, Pid).
 
-prepopulate(N, _) when N < 1 ->
+prepopulate(N, _Sup) when N < 1 ->
     queue:new();
 prepopulate(N, Sup) ->
     prepopulate(N, Sup, queue:new()).
 
-prepopulate(0, _, Workers) ->
+prepopulate(0, _Sup, Workers) ->
     Workers;
 prepopulate(N, Sup, Workers) ->
     prepopulate(N-1, Sup, queue:in(new_worker(Sup), Workers)).
@@ -315,7 +329,7 @@ prepopulate(N, Sup, Workers) ->
 add_waiting(Pid, Timeout, Queue) ->
     queue:in({Pid, Timeout, os:timestamp()}, Queue).
 
-wait_valid(infinity, _) ->
+wait_valid(infinity, _Timeout) ->
     true;
 wait_valid(StartTime, Timeout) ->
     Waited = timer:now_diff(os:timestamp(), StartTime),
