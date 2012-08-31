@@ -264,7 +264,12 @@ handle_info({'DOWN', Ref, _, _, _}, StateName, State) ->
         [[Pid]] ->
             Sup = State#state.supervisor,
             ok = supervisor:terminate_child(Sup, Pid),
-            {next_state, StateName, State};
+            %% Don't wait for the EXIT message to come in.
+            %% Deal with the worker exit right now to avoid
+            %% a race condition with messages waiting in the
+            %% mailbox.
+            true = ets:delete(State#state.monitors, Pid),
+            handle_worker_exit(Pid, StateName, State);
         [] ->
             {next_state, StateName, State}
     end;

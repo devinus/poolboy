@@ -83,7 +83,8 @@ checkin(Pool, {Worker, _}) ->
 
 kill_worker({Worker, _}) ->
     exit(Worker, kill),
-    timer:sleep(1).
+    timer:sleep(1),
+    Worker.
 
 kill_idle_worker(Pool) ->
     Pid = poolboy:checkout(Pool, false),
@@ -115,29 +116,36 @@ precondition(S,{call,_,checkin,[_Pool, Pid]}) ->
 precondition(_S,{call,_,_,_}) ->
     true.
 
-%% XXX comment out for parallel mode XXX
-%dynamic_precondition(S = #state{pid=Pid},_) when Pid /= undefined ->
-    %State = if length(S#state.checked_out) == S#state.size + S#state.max_overflow ->
-            %full;
-        %length(S#state.checked_out) >= S#state.size ->
-            %overflow;
-        %true ->
-            %ready
-    %end,
+%% check model state against internal state, only used in sequential tests
+invariant(S = #state{pid=Pid},_) when Pid /= undefined ->
+    State = if length(S#state.checked_out) == S#state.size + S#state.max_overflow ->
+            full;
+        length(S#state.checked_out) >= S#state.size ->
+            overflow;
+        true ->
+            ready
+    end,
 
-    %Workers = max(0, S#state.size - length(S#state.checked_out)),
-    %OverFlow = max(0, length(S#state.checked_out) - S#state.size),
-    %Monitors = length(S#state.checked_out),
+    Workers = max(0, S#state.size - length(S#state.checked_out)),
+    OverFlow = max(0, length(S#state.checked_out) - S#state.size),
+    Monitors = length(S#state.checked_out),
 
-    %RealStatus = gen_fsm:sync_send_all_state_event(Pid, status),
-    %case RealStatus == {State, Workers, OverFlow, Monitors} of
-        %true ->
-            %true;
-        %_ ->
-            %exit({wrong_state, RealStatus, {State, Workers, OverFlow, Monitors}})
-    %end;
-%dynamic_precondition(_,_) ->
-    %true.
+    RealStatus = gen_fsm:sync_send_all_state_event(Pid, status),
+    case RealStatus == {State, Workers, OverFlow, Monitors} of
+        true ->
+            true;
+        _ ->
+            {wrong_state, RealStatus, {State, Workers, OverFlow, Monitors}}
+    end;
+invariant(_,_) ->
+    true.
+
+%% what states block
+blocking(S, {call, _, checkout_block, _}) ->
+    %% blocking checkout can block if we expect a checkout to fail
+    not checkout_ok(S);
+blocking(_, _) ->
+    false.
 
 postcondition(S,{call,_,checkout_block,[_Pool]},R) ->
     case R of
