@@ -1,10 +1,8 @@
-Poolboy - A hunky Erlang worker pool factory
-============================================
+# Poolboy - A hunky Erlang worker pool factory
 
 [![Build Status](https://secure.travis-ci.org/basho/poolboy.png?branch=master)](http://travis-ci.org/basho/poolboy)
 
-Usage
------
+## Usage
 
 ```erl-sh
 1> Worker = poolboy:checkout(PoolName).
@@ -15,8 +13,7 @@ ok
 ok
 ```
 
-Example
--------
+## Example
 
 This is an example application showcasing database connection pools using
 Poolboy and Will Glozer's [epgsql](https://github.com/wg/epgsql).
@@ -35,7 +32,8 @@ Poolboy and Will Glozer's [epgsql](https://github.com/wg/epgsql).
         {pools, [
             {pool1, [
                 {size, 10},
-                {max_overflow, 20},
+                {max_overflow, 20}
+			], [
                 {hostname, "127.0.0.1"},
                 {database, "db1"},
                 {username, "db1"},
@@ -43,7 +41,8 @@ Poolboy and Will Glozer's [epgsql](https://github.com/wg/epgsql).
             ]},
             {pool2, [
                 {size, 5},
-                {max_overflow, 10},
+                {max_overflow, 10}
+			], [
                 {hostname, "127.0.0.1"},
                 {database, "db2"},
                 {username, "db2"},
@@ -79,11 +78,10 @@ stop(_State) ->
 
 init([]) ->
     {ok, Pools} = application:get_env(example, pools),
-    PoolSpecs = lists:map(fun({PoolName, PoolConfig}) ->
-        Args = [{name, {local, PoolName}},
-                {worker_module, example_worker}]
-                ++ PoolConfig,
-        poolboy:child_spec(PoolName, Args)
+    PoolSpecs = lists:map(fun({Name, SizeArgs, WorkerArgs}) ->
+        PoolArgs = [{name, {local, Name}},
+            		{worker_module, example_worker}] ++ SizeArgs,
+        poolboy:child_spec(Name, PoolArgs, WorkerArgs)
     end, Pools),
     {ok, {{one_for_one, 10, 10}, PoolSpecs}}.
 
@@ -145,22 +143,21 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 ```
 
-Options
--------
+## Options
 
 - `name`: the pool name
 - `worker_module`: the module that represents the workers
 - `size`: maximum pool size
 - `max_overflow`: maximum number of workers created if pool is empty
 
-Authors
--------
+## Authors
+
 - Devin Torres (devinus) <devin@devintorres.com>
 - Andrew Thompson (Vagabond) <andrew@hijacked.us>
 - Kurt Williams (onkel-dirtus) <kurt.r.williams@gmail.com>
 
-License
--------
+## License
+
 Poolboy is available in the public domain (see `UNLICENSE`).
 Poolboy is also optionally available under the Apache License (see `LICENSE`),
 meant especially for jurisdictions that do not recognize public domain works.

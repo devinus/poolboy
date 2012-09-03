@@ -1,4 +1,5 @@
 *.app
 *.beam
+.test
 .eunit
 .dialyzer_plt
