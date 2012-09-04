@@ -65,7 +65,7 @@ child_spec(Pool, PoolArgs, WorkerArgs) ->
 -spec start(PoolArgs :: proplists:proplist())
     -> {ok, pid()}.
 start(PoolArgs) ->
-    start(PoolArgs, []).
+    start(PoolArgs, PoolArgs).
 
 -spec start(PoolArgs :: proplists:proplist(),
             WorkerArgs:: proplists:proplist())
