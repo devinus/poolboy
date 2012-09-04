@@ -14,6 +14,9 @@ compile:
 test: compile
 	@$(REBAR) eunit skip_deps=true
 
+qc: compile
+	@$(REBAR) qc skip_deps=true
+
 clean:
 	@$(REBAR) clean
 
