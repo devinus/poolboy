@@ -5,7 +5,7 @@
 
 -export([checkout/1, checkout/2, checkout/3, checkin/2, transaction/2,
          child_spec/2, child_spec/3, start/1, start/2, start_link/1,
-		 start_link/2, stop/1, status/1]).
+         start_link/2, stop/1, status/1]).
 -export([init/1, ready/2, ready/3, overflow/2, overflow/3, full/2, full/3,
          handle_event/3, handle_sync_event/4, handle_info/3, terminate/3,
          code_change/4]).
@@ -63,20 +63,21 @@ child_spec(Pool, PoolArgs, WorkerArgs) ->
      permanent, 5000, worker, [poolboy]}.
 
 -spec start(PoolArgs :: proplists:proplist())
-	-> {ok, pid()}.
+    -> {ok, pid()}.
 start(PoolArgs) ->
-	start(PoolArgs, []).
+    start(PoolArgs, []).
 
 -spec start(PoolArgs :: proplists:proplist(),
-			WorkerArgs:: proplists:proplist())
+            WorkerArgs:: proplists:proplist())
     -> {ok, pid()}.
 start(PoolArgs, WorkerArgs) ->
-	start_pool(start, PoolArgs, WorkerArgs).
+    start_pool(start, PoolArgs, WorkerArgs).
 
 -spec start_link(PoolArgs :: proplists:proplist())
     -> {ok, pid()}.
 start_link(PoolArgs)  ->
-    start_link(PoolArgs, []).
+    %% for backwards compatability, pass the pool args as the worker args as well
+    start_link(PoolArgs, PoolArgs).
 
 -spec start_link(PoolArgs :: proplists:proplist(),
                  WorkerArgs:: proplists:proplist())
@@ -106,7 +107,7 @@ init([{size, Size} | Rest], WorkerArgs, State) when is_integer(Size) ->
 init([{max_overflow, MaxOverflow} | Rest], WorkerArgs, State) when is_integer(MaxOverflow) ->
     init(Rest, WorkerArgs, State#state{max_overflow=MaxOverflow});
 init([_ | Rest], WorkerArgs, State) ->
-	init(Rest, WorkerArgs, State);
+    init(Rest, WorkerArgs, State);
 init([], _WorkerArgs, #state{size=Size, supervisor=Sup, max_overflow=MaxOverflow}=State) ->
     Workers = prepopulate(Size, Sup),
     StartState = case Size of
