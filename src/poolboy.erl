@@ -63,7 +63,7 @@ server_call(Pool, Request, Timeout) ->
         ok = poolboy:checkin(Pool, Worker)
     end.
 
--spec server_cast(Pool :: node(), Request :: any()) -> any().
+-spec server_cast(Pool :: node(), Request :: any()) -> ok.
 server_cast(Pool, Request) ->
     Worker = poolboy:checkout(Pool),
     try
