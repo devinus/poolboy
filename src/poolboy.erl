@@ -3,7 +3,8 @@
 -module(poolboy).
 -behaviour(gen_fsm).
 
--export([checkout/1, checkout/2, checkout/3, checkin/2, transaction/2,
+-export([checkout/1, checkout/2, checkout/3, checkin/2, 
+         transaction/2, server_call/2, server_call/3, server_cast/2, 
          child_spec/2, child_spec/3, start/1, start/2, start_link/1,
          start_link/2, stop/1, status/1]).
 -export([init/1, ready/2, ready/3, overflow/2, overflow/3, full/2, full/3,
@@ -45,6 +46,28 @@ transaction(Pool, Fun) ->
     Worker = poolboy:checkout(Pool),
     try
         Fun(Worker)
+    after
+        ok = poolboy:checkin(Pool, Worker)
+    end.
+
+-spec server_call(Pool :: node(), Request :: any()) -> any().
+server_call(Pool, Request) ->
+    server_call(Pool, Request, ?TIMEOUT).
+
+-spec server_call(Pool :: node(), Request :: any(), Timeout :: timeout()) -> any().
+server_call(Pool, Request, Timeout) ->
+    Worker = poolboy:checkout(Pool),
+    try
+        gen_server:call(Worker, Request, Timeout)
+    after
+        ok = poolboy:checkin(Pool, Worker)
+    end.
+
+-spec server_cast(Pool :: node(), Request :: any()) -> any().
+server_cast(Pool, Request) ->
+    Worker = poolboy:checkout(Pool),
+    try
+        gen_server:cast(Worker, Request)
     after
         ok = poolboy:checkin(Pool, Worker)
     end.
