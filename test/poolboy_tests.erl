@@ -369,7 +369,31 @@ checkin_after_exception_in_transaction() ->
 pool_returns_status() ->
     {ok, Pool} = new_pool(2, 0),
     ?assertEqual({ready, 2, 0, 0}, poolboy:status(Pool)),
-    ok = ?sync(Pool, stop).
+    poolboy:checkout(Pool),
+    ?assertEqual({ready, 1, 0, 1}, poolboy:status(Pool)),
+    poolboy:checkout(Pool),
+    ?assertEqual({full, 0, 0, 2}, poolboy:status(Pool)),
+    ok = ?sync(Pool, stop),
+
+    {ok, Pool2} = new_pool(1, 1),
+    ?assertEqual({ready, 1, 0, 0}, poolboy:status(Pool2)),
+    poolboy:checkout(Pool2),
+    ?assertEqual({overflow, 0, 0, 1}, poolboy:status(Pool2)),
+    poolboy:checkout(Pool2),
+    ?assertEqual({full, 0, 1, 2}, poolboy:status(Pool2)),
+    ok = ?sync(Pool2, stop),
+
+    {ok, Pool3} = new_pool(0, 2),
+    ?assertEqual({overflow, 0, 0, 0}, poolboy:status(Pool3)),
+    poolboy:checkout(Pool3),
+    ?assertEqual({overflow, 0, 1, 1}, poolboy:status(Pool3)),
+    poolboy:checkout(Pool3),
+    ?assertEqual({full, 0, 2, 2}, poolboy:status(Pool3)),
+    ok = ?sync(Pool3, stop),
+
+    {ok, Pool4} = new_pool(0, 0),
+    ?assertEqual({full, 0, 0, 0}, poolboy:status(Pool4)),
+    ok = ?sync(Pool4, stop).
 
 new_pool(Size, MaxOverflow) ->
     poolboy:start_link([{name, {local, poolboy_test}},

@@ -150,15 +150,9 @@ handle_call({checkout, Block, Timeout}, {FromPid, _} = From, State) ->
 handle_call(status, _From, State) ->
     #state{workers = Workers,
            monitors = Monitors,
-           overflow = Overflow,
-           max_overflow = MaxOverflow} = State,
-    WorkersLen = queue:len(Workers),
-    StateName = case WorkersLen == 0 of
-        true when MaxOverflow < 1 -> full;
-        true -> overflow;
-        false -> ready
-    end,
-    {reply, {StateName, WorkersLen, Overflow, ets:info(Monitors, size)}, State};
+           overflow = Overflow} = State,
+    StateName = state_name(State),
+    {reply, {StateName, queue:len(Workers), Overflow, ets:info(Monitors, size)}, State};
 handle_call(get_avail_workers, _From, State) ->
     Workers = State#state.workers,
     WorkerList = queue:to_list(Workers),
@@ -311,3 +305,15 @@ handle_worker_exit(Pid, State) ->
             ),
             State#state{workers = Workers, waiting = Empty}
     end.
+
+state_name(State = #state{overflow = Overflow}) when Overflow < 1 ->
+    #state{max_overflow = MaxOverflow, workers = Workers} = State,
+    case queue:len(Workers) == 0 of
+        true when MaxOverflow < 1 -> full;
+        true -> overflow;
+        false -> ready
+    end;
+state_name(#state{overflow = MaxOverflow, max_overflow = MaxOverflow}) ->
+    full;
+state_name(_State) ->
+    overflow.
