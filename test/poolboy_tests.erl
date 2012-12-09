@@ -53,6 +53,9 @@ pool_test_() ->
             },
             {<<"Pool returns status">>,
                 fun pool_returns_status/0
+            },
+            {<<"Can not spawn worker for a while">>,
+                fun backoff_cant_spawn_worker/0
             }
         ]
     }.
@@ -395,7 +398,71 @@ pool_returns_status() ->
     ?assertEqual({full, 0, 0, 0}, poolboy:status(Pool4)),
     ok = ?sync(Pool4, stop).
 
-new_pool(Size, MaxOverflow) ->
-    poolboy:start_link([{name, {local, poolboy_test}},
-                        {worker_module, poolboy_test_worker},
-                        {size, Size}, {max_overflow, MaxOverflow}]).
+backoff_cant_spawn_worker() ->
+    Self = self(),
+    {ok, Pool} = new_backoff_pool(0, 1, [{locker, self()}]),
+    Nums = lists:seq(1, 3),
+    lists:foreach(
+        fun(_) ->
+            %% first worker will be wpawned, others will be queued
+            spawn(fun() ->
+                Worker = poolboy:checkout(Pool, true, 150),
+                Self ! {got_worker, Worker},
+                checkin_worker(Pool, Worker)
+            end)
+        end, Nums
+    ),
+
+    receive {may_i_proceed, FailWorker} ->
+        %% we disallow to init worker this time
+        erlang:monitor(process, FailWorker),
+        FailWorker ! no,
+        receive
+            {'DOWN', _, process, FailWorker, _} ->
+                ?assert(true)
+        after 150 ->
+            ?assert(false)
+        end
+    after 150 ->
+        ?assert(false)
+    end,
+
+    receive {may_i_proceed, FutureWorker} ->
+        %% then after some timeout poolboy wil try to reinit a worker
+        ?assert(true),
+        FutureWorker ! ok,
+        %% after 1st spawned process got the worker and made checkin,
+        %% worker's Pid must be reused (other checkout calls were queued)
+        lists:foreach(
+            fun(_) ->
+                receive {got_worker, FutureWorker} ->
+                    ?assert(true)
+                after 50 ->
+                    ?assert(false)
+                end
+            end, Nums
+        )
+    after 200 ->
+        ?assert(false)
+    end,
+
+    ok = ?sync(Pool, stop).
+
+new_backoff_pool(Size, MaxOverflow, WorkerArgs) when is_list(WorkerArgs) ->
+    AddPoolArgs = [
+        {size, Size}, {max_overflow, MaxOverflow},
+        {backoff, {erlang, '+', [100]}}
+    ],
+    new_pool(AddPoolArgs, WorkerArgs).
+
+new_pool(Size, MaxOverflow) when is_integer(Size), is_integer(MaxOverflow) ->
+    AddPoolArgs = [{size, Size}, {max_overflow, MaxOverflow}],
+    new_pool(AddPoolArgs, []);
+
+new_pool(AddPoolArgs, WorkerArgs)
+        when is_list(AddPoolArgs), is_list(WorkerArgs) ->
+    PoolArgs = [
+        {name, {local, poolboy_test}},
+        {worker_module, poolboy_test_worker}
+    ],
+    poolboy:start_link(AddPoolArgs ++ PoolArgs, WorkerArgs).
