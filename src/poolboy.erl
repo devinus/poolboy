@@ -175,14 +175,8 @@ handle_call(_Msg, _From, State) ->
 handle_info({'DOWN', Ref, _, _, _}, State) ->
     case ets:match(State#state.monitors, {'$1', Ref}) of
         [[Pid]] ->
-            Sup = State#state.supervisor,
-            ok = supervisor:terminate_child(Sup, Pid),
-            %% Don't wait for the EXIT message to come in.
-            %% Deal with the worker exit right now to avoid
-            %% a race condition with messages waiting in the
-            %% mailbox.
             true = ets:delete(State#state.monitors, Pid),
-            NewState = handle_worker_exit(Pid, State),
+            NewState = handle_checkin(Pid, State),
             {noreply, NewState};
         [] ->
             {noreply, State}
@@ -308,12 +302,12 @@ handle_worker_exit(Pid, State) ->
 
 state_name(State = #state{overflow = Overflow}) when Overflow < 1 ->
     #state{max_overflow = MaxOverflow, workers = Workers} = State,
-    case queue:len(Workers) == 0 of
+    case queue:len(Workers) < 1 of
         true when MaxOverflow < 1 -> full;
         true -> overflow;
         false -> ready
     end;
-state_name(#state{overflow = MaxOverflow, max_overflow = MaxOverflow}) ->
+state_name(#state{overflow = Overflow, max_overflow = MaxOverflow}) when Overflow >= MaxOverflow ->
     full;
 state_name(_State) ->
     overflow.
