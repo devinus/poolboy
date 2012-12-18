@@ -67,7 +67,7 @@ start_poolboy(Args) ->
     Pid.
 
 stop_poolboy(Pid) ->
-    gen_fsm:sync_send_all_state_event(Pid, stop),
+    gen_server:call(Pid, stop),
     timer:sleep(1).
 
 checkout_nonblock(Pool) ->
@@ -78,7 +78,7 @@ checkout_block(Pool) ->
 
 checkin(Pool, {Worker, _}) ->
     Res = poolboy:checkin(Pool, Worker),
-    gen_fsm:sync_send_all_state_event(Pool, get_avail_workers),
+    gen_server:call(Pool, get_avail_workers),
     Res.
 
 kill_worker({Worker, _}) ->
@@ -130,7 +130,7 @@ invariant(S = #state{pid=Pid},_) when Pid /= undefined ->
     OverFlow = max(0, length(S#state.checked_out) - S#state.size),
     Monitors = length(S#state.checked_out),
 
-    RealStatus = gen_fsm:sync_send_all_state_event(Pid, status),
+    RealStatus = gen_server:call(Pid, status),
     case RealStatus == {State, Workers, OverFlow, Monitors} of
         true ->
             true;
