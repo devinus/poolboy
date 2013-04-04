@@ -1,4 +1,4 @@
-REBAR = ./rebar
+REBAR = rebar
 DIALYZER = dialyzer
 
 DIALYZER_WARNINGS = -Wunmatched_returns -Werror_handling \
@@ -23,10 +23,11 @@ clean:
 get-deps:
 	@$(REBAR) get-deps
 
-build-plt:
+.dialyzer_plt:
 	@$(DIALYZER) --build_plt --output_plt .dialyzer_plt \
 	    --apps kernel stdlib
 
-dialyze: compile
-	@$(DIALYZER) --src src --plt .dialyzer_plt $(DIALYZER_WARNINGS) | \
-	    fgrep -vf .dialyzer-ignore-warnings
+build-plt: .dialyzer_plt
+
+dialyze: build-plt
+	@$(DIALYZER) --src src --plt .dialyzer_plt $(DIALYZER_WARNINGS)
