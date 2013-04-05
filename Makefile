@@ -4,7 +4,7 @@ DIALYZER = dialyzer
 DIALYZER_WARNINGS = -Wunmatched_returns -Werror_handling \
                     -Wrace_conditions -Wunderspecs
 
-.PHONY: all compile test clean get-deps build-plt dialyze
+.PHONY: all compile test qc clean get-deps build-plt dialyze
 
 all: compile
 
