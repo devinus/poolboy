@@ -255,7 +255,7 @@ prepopulate(N, Sup, Workers) ->
 add_waiting(Pid, Timeout, Queue) ->
     queue:in({Pid, Timeout, os:timestamp()}, Queue).
 
-wait_valid(infinity, _Timeout) ->
+wait_valid(_StartTime, infinity) ->
     true;
 wait_valid(StartTime, Timeout) ->
     Waited = timer:now_diff(os:timestamp(), StartTime),
