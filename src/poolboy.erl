@@ -9,6 +9,13 @@
 -export([init/1, ready/2, ready/3, overflow/2, overflow/3, full/2, full/3,
          handle_event/3, handle_sync_event/4, handle_info/3, terminate/3,
          code_change/4]).
+-ifdef(PULSE).
+-compile(export_all).
+-compile({parse_transform, pulse_instrument}).
+-compile({pulse_replace_module, [{gen_fsm, pulse_gen_fsm},
+                                 {gen_server, pulse_gen_server},
+                                 {supervisor, pulse_supervisor}]}).
+-endif.
 
 -define(TIMEOUT, 5000).
 
