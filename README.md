@@ -149,6 +149,7 @@ code_change(_OldVsn, State, _Extra) ->
 - `worker_module`: the module that represents the workers
 - `size`: maximum pool size
 - `max_overflow`: maximum number of workers created if pool is empty
+- `backoff`: handle spawn timeouts in case if worker is unable to be started
 
 ## Authors
 
