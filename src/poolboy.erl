@@ -8,6 +8,7 @@
          start_link/1, start_link/2, stop/1, status/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
          code_change/3]).
+-export([reap_worker/3]).
 
 -define(TIMEOUT, 5000).
 
@@ -127,6 +128,10 @@ handle_cast({checkin, Pid}, State = #state{monitors = Monitors}) ->
             {noreply, State}
     end;
 
+handle_cast({reap_worker, Sup, Pid}, State) ->
+    dismiss_worker(Sup, Pid),
+    {noreply, State#state { overflow = State#state.overflow - 1 }};
+
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -238,6 +243,9 @@ new_worker(Sup, FromPid) ->
     Ref = erlang:monitor(process, FromPid),
     {Pid, Ref}.
 
+reap_worker(Pool, Sup, Pid) ->
+    gen_server:cast(Pool, {reap_worker, Sup, Pid}).
+
 dismiss_worker(Sup, Pid) ->
     true = unlink(Pid),
     supervisor:terminate_child(Sup, Pid).
@@ -278,8 +286,8 @@ handle_checkin(Pid, State) ->
                     handle_checkin(Pid, State#state{waiting = Left})
             end;
         {empty, Empty} when Overflow > 0 ->
-            ok = dismiss_worker(Sup, Pid),
-            State#state{waiting = Empty, overflow = Overflow - 1};
+            {ok, _Tref} = timer:apply_after(5000, poolboy, reap_worker, [self(), Sup, Pid]),
+            State#state{waiting = Empty};
         {empty, Empty} ->
             Workers = queue:in(Pid, State#state.workers),
             State#state{workers = Workers, waiting = Empty, overflow = 0}
