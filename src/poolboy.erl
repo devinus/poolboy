@@ -8,7 +8,7 @@
          start_link/1, start_link/2, stop/1, status/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
          code_change/3]).
--export([reap_worker/3]).
+-export([reap_worker/4]).
 
 -define(TIMEOUT, 5000).
 
@@ -19,7 +19,8 @@
     monitors :: ets:tid(),
     size = 5 :: non_neg_integer(),
     overflow = 0 :: non_neg_integer(),
-    max_overflow = 10 :: non_neg_integer()
+    max_overflow = 10 :: non_neg_integer(),
+    to_be_reaped
 }).
 
 -spec checkout(Pool :: node()) -> pid().
@@ -102,7 +103,8 @@ init({PoolArgs, WorkerArgs}) ->
     process_flag(trap_exit, true),
     Waiting = queue:new(),
     Monitors = ets:new(monitors, [private]),
-    init(PoolArgs, WorkerArgs, #state{waiting = Waiting, monitors = Monitors}).
+    init(PoolArgs, WorkerArgs, #state{waiting = Waiting, monitors = Monitors,
+                                      to_be_reaped = []}).
 
 init([{worker_module, Mod} | Rest], WorkerArgs, State) when is_atom(Mod) ->
     {ok, Sup} = poolboy_sup:start_link(Mod, WorkerArgs),
@@ -120,17 +122,18 @@ init([], _WorkerArgs, #state{size = Size, supervisor = Sup} = State) ->
 handle_cast({checkin, Pid}, State = #state{monitors = Monitors}) ->
     case ets:lookup(Monitors, Pid) of
         [{Pid, Ref}] ->
-            true = erlang:demonitor(Ref),
-            true = ets:delete(Monitors, Pid),
-            NewState = handle_checkin(Pid, State),
+            NewState = handle_checkin(Pid, State, Ref),
             {noreply, NewState};
         [] ->
             {noreply, State}
     end;
 
-handle_cast({reap_worker, Sup, Pid}, State) ->
+handle_cast({reap_worker, Sup, Pid, Ref}, State) ->
+    unmonitor(Ref, State#state.monitors, Pid),
     dismiss_worker(Sup, Pid),
-    {noreply, State#state { overflow = State#state.overflow - 1 }};
+    ReapList = lists:keydelete(Pid, 1, State#state.to_be_reaped),
+    {noreply, State#state { overflow = State#state.overflow - 1,
+                          to_be_reaped = ReapList}};
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -143,9 +146,18 @@ handle_call({checkout, Block, Timeout}, {FromPid, _} = From, State) ->
            max_overflow = MaxOverflow} = State,
     case queue:out(Workers) of
         {{value, Pid}, Left} ->
+            ReapList = State#state.to_be_reaped,
+            NewReapList = case lists:keyfind(Pid, 1, ReapList) of
+                              false ->
+                                  ReapList;
+                              {_Pid, Tref}  ->
+                                  timer:cancel(Tref),
+                                  lists:keydelete(Pid, 1, ReapList)
+                          end,
+
             Ref = erlang:monitor(process, FromPid),
             true = ets:insert(Monitors, {Pid, Ref}),
-            {reply, Pid, State#state{workers = Left}};
+            {reply, Pid, State#state{workers = Left, to_be_reaped = NewReapList}};
         {empty, Empty} when MaxOverflow > 0, Overflow < MaxOverflow ->
             {Pid, Ref} = new_worker(Sup, FromPid),
             true = ets:insert(Monitors, {Pid, Ref}),
@@ -243,8 +255,8 @@ new_worker(Sup, FromPid) ->
     Ref = erlang:monitor(process, FromPid),
     {Pid, Ref}.
 
-reap_worker(Pool, Sup, Pid) ->
-    gen_server:cast(Pool, {reap_worker, Sup, Pid}).
+reap_worker(Pool, Sup, Pid, Ref) ->
+    gen_server:cast(Pool, {reap_worker, Sup, Pid, Ref}).
 
 dismiss_worker(Sup, Pid) ->
     true = unlink(Pid),
@@ -269,13 +281,18 @@ wait_valid(StartTime, Timeout) ->
     Waited = timer:now_diff(os:timestamp(), StartTime),
     (Waited div 1000) < Timeout.
 
-handle_checkin(Pid, State) ->
+unmonitor(Ref, Monitors, Pid) ->
+    true = erlang:demonitor(Ref),
+    true = ets:delete(Monitors, Pid).
+
+handle_checkin(Pid, State, Ref) ->
     #state{supervisor = Sup,
            waiting = Waiting,
            monitors = Monitors,
            overflow = Overflow} = State,
     case queue:out(Waiting) of
         {{value, {{FromPid, _} = From, Timeout, StartTime}}, Left} ->
+            unmonitor(Ref, Monitors, Pid),
             case wait_valid(StartTime, Timeout) of
                 true ->
                     Ref1 = erlang:monitor(process, FromPid),
@@ -283,12 +300,22 @@ handle_checkin(Pid, State) ->
                     gen_server:reply(From, Pid),
                     State#state{waiting = Left};
                 false ->
-                    handle_checkin(Pid, State#state{waiting = Left})
+                    handle_checkin(Pid, State#state{waiting = Left}, Ref)
             end;
         {empty, Empty} when Overflow > 0 ->
-            {ok, _Tref} = timer:apply_after(5000, poolboy, reap_worker, [self(), Sup, Pid]),
-            State#state{waiting = Empty};
+            unmonitor(Ref, Monitors, Pid),
+            ReapList = State#state.to_be_reaped,
+            NewReapList = case lists:keyfind(Pid, 1, ReapList) of
+                              false ->
+                                  {ok, Tref} = timer:apply_after(2000, poolboy, reap_worker, [self(), Sup, Pid, Ref]),
+                                  ReapList ++ [{Pid, Tref}];
+                              _ ->
+                                  ReapList
+                          end,
+            Workers = queue:in(Pid, State#state.workers),
+            State#state{workers = Workers, waiting = Empty, to_be_reaped = NewReapList};
         {empty, Empty} ->
+            unmonitor(Ref, Monitors, Pid),
             Workers = queue:in(Pid, State#state.workers),
             State#state{workers = Workers, waiting = Empty, overflow = 0}
     end.
