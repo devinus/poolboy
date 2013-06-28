@@ -128,12 +128,18 @@ handle_cast({checkin, Pid}, State = #state{monitors = Monitors}) ->
             {noreply, State}
     end;
 
-handle_cast({reap_worker, Sup, Pid, Ref}, State) ->
+handle_cast({reap_worker, Sup, Pid, Ref}, State) when State#state.overflow > 0 ->
     unmonitor(Ref, State#state.monitors, Pid),
     dismiss_worker(Sup, Pid),
     ReapList = lists:keydelete(Pid, 1, State#state.to_be_reaped),
-    {noreply, State#state { overflow = State#state.overflow - 1,
-                          to_be_reaped = ReapList}};
+
+    %% This pid is no longer a worker.
+    Workers = queue:filter(fun(W) ->
+                                   W /= Pid
+                           end, State#state.workers),
+
+    {noreply, State#state { workers = Workers, overflow = State#state.overflow - 1,
+                            to_be_reaped = ReapList}};
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
