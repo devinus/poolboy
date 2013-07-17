@@ -41,7 +41,8 @@ Poolboy and Will Glozer's [epgsql](https://github.com/wg/epgsql).
             ]},
             {pool2, [
                 {size, 5},
-                {max_overflow, 10}
+                {max_overflow, 10},
+		{restart_delay, 30}
 			], [
                 {hostname, "127.0.0.1"},
                 {database, "db2"},
@@ -149,6 +150,9 @@ code_change(_OldVsn, State, _Extra) ->
 - `worker_module`: the module that represents the workers
 - `size`: maximum pool size
 - `max_overflow`: maximum number of workers created if pool is empty
+- `restart_delay`: delay for retrying a failed start of a worker child. If 0 
+(or missing) it will be unsafe, crashing poolboy instance if an error happens
+in the process.
 
 ## Authors
 
