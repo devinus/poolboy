@@ -232,12 +232,23 @@ handle_info({'EXIT', Pid, _Reason}, State) ->
 handle_info(delayed_restart, State) ->
     #state{supervisor = Sup,
            workers = Workers,
+           monitors = Monitors,
+           size = Size,
+           overflow = Overflow,
            restart_delay = Delay} = State,
-    case queue:is_empty(State#state.waiting) of
+    CurWorkers = ets:info(Monitors, size) + queue:len(Workers),
+    if 
+        CurWorkers >= Size, Overflow > 0 ->
+            %% Overflow active, make one of those clients persist.
+            {noreply, State#state{overflow = Overflow - 1}};
         true ->
-            {noreply, State#state{workers = add_new_worker(Delay, Sup, Workers)}};
-        false ->
-            {noreply, assign_new_worker(State)}
+            case queue:is_empty(State#state.waiting) of
+                true ->
+                    {noreply, 
+                     State#state{workers = add_new_worker(Delay, Sup, Workers)}};
+                false ->
+                    {noreply, assign_new_worker(State)}
+            end
     end;
    
 handle_info(_Info, State) ->
