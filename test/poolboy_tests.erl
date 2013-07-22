@@ -53,6 +53,12 @@ pool_test_() ->
             },
             {<<"Pool returns status">>,
                 fun pool_returns_status/0
+            },
+            {<<"Pool tries to restart a worker after a specified delay">>,
+                fun pool_restart_delayed/0
+            },
+            {<<"Pool deals with overflow and delayed restarts">>,
+                fun pool_overflow_delayed/0
             }
         ]
     }.
@@ -395,7 +401,60 @@ pool_returns_status() ->
     ?assertEqual({full, 0, 0, 0}, poolboy:status(Pool4)),
     ok = ?sync(Pool4, stop).
 
+pool_restart_delayed() ->
+    %% Starts a failing worker and tries to do a checkout,
+    %% returning a dead_endpoint. 
+    initialize_counter(2),
+    {ok, Pool} = new_pool_delay(1, 0, 1),
+    timer:sleep(500),
+    ?assertEqual(dead_endpoint, poolboy:checkout(Pool)),
+    ?assertEqual(0, length(?sync(Pool, get_avail_workers))),    
+    timer:sleep(1000),
+    ?assertEqual(1, length(?sync(Pool, get_avail_workers))),
+
+    %% After a successful restart we kill the worker. This
+    %% would trigger a failed restart. We check that it would 
+    %% be restarted after the delay once again.
+    Pid = poolboy:checkout(Pool),
+    kill_worker(Pid),
+    ?assertEqual(0, length(?sync(Pool, get_avail_workers))),
+    timer:sleep(1500),
+    ?assertEqual(1, length(?sync(Pool, get_avail_workers))),
+    ok = ?sync(Pool, stop),
+    stop_counter().
+    
+
+pool_overflow_delayed() ->
+    %% Checks that an overflow client, properly started
+    %% would become a regular client when the delay hits
+    %% if needed.
+    initialize_counter(2),
+    {ok, Pool} = new_pool_delay(1, 1, 1),
+    ?assertEqual(0, length(?sync(Pool, get_avail_workers))),    
+    Pid = poolboy:checkout(Pool),
+    ?assert(is_pid(Pid)),
+    timer:sleep(1200),
+    checkin_worker(Pool, Pid),
+    ?assertEqual([Pid], ?sync(Pool, get_avail_workers)),
+    ok = ?sync(Pool, stop),
+    stop_counter().    
+    
 new_pool(Size, MaxOverflow) ->
     poolboy:start_link([{name, {local, poolboy_test}},
                         {worker_module, poolboy_test_worker},
                         {size, Size}, {max_overflow, MaxOverflow}]).
+
+new_pool_delay(Size, MaxOverflow, Delay) ->
+    poolboy:start_link([{name, {local, poolboy_test}},
+                        {worker_module, poolboy_test_worker_delay},
+                        {size, Size}, {max_overflow, MaxOverflow},
+                        {restart_delay, Delay}]).
+
+initialize_counter(Success) ->
+    ets:new(error_counter, [named_table, public]),
+    ets:insert(error_counter, [{current, 0},
+                               {success, Success}]).
+
+stop_counter() ->
+    ets:delete(error_counter).
+
