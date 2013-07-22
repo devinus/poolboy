@@ -148,25 +148,17 @@ handle_call({checkout, Block, Timeout}, {FromPid, _} = From, State) ->
             Ref = erlang:monitor(process, FromPid),
             true = ets:insert(Monitors, {Pid, Ref}),
             {reply, Pid, State#state{workers = Left}};
-        {empty, Empty} when MaxOverflow > 0, Overflow < MaxOverflow ->
-            case new_overflow_worker(Delay, Sup) of
-                undefined ->
-                    {reply, dead_endpoint, State#state{workers = Empty}};
+        {empty, _Empty} when MaxOverflow > 0, Overflow < MaxOverflow ->
+            case new_overflow_worker(Delay, Sup) of                
+                undefined ->                    
+                    wait_or_reply(State, Block, From, Timeout);
                 Pid ->
                     Ref = monitor(process, FromPid),
                     true = ets:insert(Monitors, {Pid, Ref}),                    
-                    {reply, Pid, State#state{workers = Empty, overflow = Overflow + 1}}
+                    {reply, Pid, State#state{overflow = Overflow + 1}}
             end;
-        {empty, Empty} ->
-            case ets:info(Monitors, size) of
-                0 ->
-                    {reply, dead_endpoint, State#state{workers = Empty}};
-                _ when Block =:= false ->
-                    {reply, full, State#state{workers = Empty}};
-                _ ->
-                    Waiting = add_waiting(From, Timeout, State#state.waiting),
-                    {noreply, State#state{workers = Empty, waiting = Waiting}}
-            end
+        {empty, _Empty} ->
+            wait_or_reply(State, Block, From, Timeout)
     end;
 
 handle_call(status, _From, State) ->
@@ -232,15 +224,15 @@ handle_info({'EXIT', Pid, _Reason}, State) ->
 handle_info(delayed_restart, State) ->
     #state{supervisor = Sup,
            workers = Workers,
-           monitors = Monitors,
-           size = Size,
            overflow = Overflow,
            restart_delay = Delay} = State,
-    CurWorkers = ets:info(Monitors, size) + queue:len(Workers),
-    if 
-        CurWorkers >= Size, Overflow > 0 ->
+    case below_size_limit(State) of
+        false when Overflow > 0 ->
             %% Overflow active, make one of those clients persist.
             {noreply, State#state{overflow = Overflow - 1}};
+        false ->
+            %% One of the overflow workers is part of the worker pool now.
+            {noreply, State};
         true ->
             case queue:is_empty(State#state.waiting) of
                 true ->
@@ -320,6 +312,27 @@ assign_new_worker(State) ->
         _ ->
             assign_new_worker(State#state{waiting = LeftWaiting})
     end.
+
+-spec below_size_limit(#state{}) -> boolean().
+below_size_limit(State) ->
+    CurWorkers = ets:info(State#state.monitors, size) + queue:len(State#state.workers),
+    CurWorkers < State#state.size.
+    
+-spec wait_or_reply(#state{}, boolean(), 
+                    {pid(), term()}, pos_integer()) ->
+                           {reply, atom(), #state{}} |
+                           {noreply, #state{}}.
+wait_or_reply(State, Block, From, Timeout) ->
+    case ets:info(State#state.monitors, size) of
+        0 ->
+            {reply, dead_endpoint, State};
+        _ when Block =:= false ->
+            {reply, full, State};
+        _ ->
+            Waiting = add_waiting(From, Timeout, State#state.waiting),
+            {noreply, State#state{waiting = Waiting}}
+    end.
+
 %%% End: Internal functions to deal with optional restarts
 
 
@@ -350,6 +363,7 @@ handle_checkin(Pid, State) ->
     #state{supervisor = Sup,
            waiting = Waiting,
            monitors = Monitors,
+           restart_delay = Delay,
            overflow = Overflow} = State,
     case queue:out(Waiting) of
         {{value, {{FromPid, _} = From, Timeout, StartTime}}, Left} ->
@@ -363,8 +377,20 @@ handle_checkin(Pid, State) ->
                     handle_checkin(Pid, State#state{waiting = Left})
             end;
         {empty, Empty} when Overflow > 0 ->
-            ok = dismiss_worker(Sup, Pid),
-            State#state{waiting = Empty, overflow = Overflow - 1};
+            if Delay > 0 ->
+                    case below_size_limit(State) of
+                        true ->
+                            Workers = queue:in(Pid, State#state.workers),
+                            State#state{workers = Workers, waiting = Empty, 
+                                        overflow = Overflow - 1};
+                        false ->
+                            ok = dismiss_worker(Sup, Pid),
+                            State#state{waiting = Empty, overflow = Overflow - 1}
+                    end;                            
+               true ->
+                    ok = dismiss_worker(Sup, Pid),
+                    State#state{waiting = Empty, overflow = Overflow - 1}
+            end;
         {empty, Empty} ->
             Workers = queue:in(Pid, State#state.workers),
             State#state{workers = Workers, waiting = Empty, overflow = 0}
