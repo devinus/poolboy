@@ -31,8 +31,12 @@ checkout(Pool, Block) ->
 
 -spec checkout(Pool :: node(), Block :: boolean(), Timeout :: timeout())
     -> pid() | full.
+checkout(Pool, Block, infinity) ->
+    gen_server:call(Pool, {checkout, Block, infinity}, infinity);
 checkout(Pool, Block, Timeout) ->
-    gen_server:call(Pool, {checkout, Block, Timeout}, Timeout).
+    {MegaSecs, Secs, MicroSecs} = os:timestamp(),
+    Deadline = {MegaSecs, Secs, MicroSecs + Timeout},
+    gen_server:call(Pool, {checkout, Block, Deadline}, Timeout).
 
 -spec checkin(Pool :: node(), Worker :: pid()) -> ok.
 checkin(Pool, Worker) when is_pid(Worker) ->
@@ -130,7 +134,7 @@ handle_cast({checkin, Pid}, State = #state{monitors = Monitors}) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_call({checkout, Block, Timeout}, {FromPid, _} = From, State) ->
+handle_call({checkout, Block, Deadline}, {FromPid, _} = From, State) ->
     #state{supervisor = Sup,
            workers = Workers,
            monitors = Monitors,
@@ -148,7 +152,7 @@ handle_call({checkout, Block, Timeout}, {FromPid, _} = From, State) ->
         {empty, Empty} when Block =:= false ->
             {reply, full, State#state{workers = Empty}};
         {empty, Empty} ->
-            Waiting = add_waiting(From, Timeout, State#state.waiting),
+            Waiting = add_waiting(From, Deadline, State#state.waiting),
             {noreply, State#state{workers = Empty, waiting = Waiting}}
     end;
 
@@ -252,14 +256,13 @@ prepopulate(0, _Sup, Workers) ->
 prepopulate(N, Sup, Workers) ->
     prepopulate(N-1, Sup, queue:in(new_worker(Sup), Workers)).
 
-add_waiting(Pid, Timeout, Queue) ->
-    queue:in({Pid, Timeout, os:timestamp()}, Queue).
+add_waiting(Pid, Deadline, Queue) ->
+    queue:in({Pid, Deadline}, Queue).
 
-wait_valid(_StartTime, infinity) ->
-    true;
-wait_valid(StartTime, Timeout) ->
-    Waited = timer:now_diff(os:timestamp(), StartTime),
-    (Waited div 1000) < Timeout.
+past_deadline(infinity) ->
+    false;
+past_deadline(Deadline) ->
+    timer:now_diff(os:timestamp(), Deadline) < 0.
 
 handle_checkin(Pid, State) ->
     #state{supervisor = Sup,
@@ -267,14 +270,14 @@ handle_checkin(Pid, State) ->
            monitors = Monitors,
            overflow = Overflow} = State,
     case queue:out(Waiting) of
-        {{value, {{FromPid, _} = From, Timeout, StartTime}}, Left} ->
-            case wait_valid(StartTime, Timeout) of
-                true ->
+        {{value, {{FromPid, _} = From, Deadline}}, Left} ->
+            case past_deadline(Deadline) of
+                false ->
                     Ref1 = erlang:monitor(process, FromPid),
                     true = ets:insert(Monitors, {Pid, Ref1}),
                     gen_server:reply(From, Pid),
                     State#state{waiting = Left};
-                false ->
+                true ->
                     handle_checkin(Pid, State#state{waiting = Left})
             end;
         {empty, Empty} when Overflow > 0 ->
@@ -290,15 +293,15 @@ handle_worker_exit(Pid, State) ->
            monitors = Monitors,
            overflow = Overflow} = State,
     case queue:out(State#state.waiting) of
-        {{value, {{FromPid, _} = From, Timeout, StartTime}}, LeftWaiting} ->
-            case wait_valid(StartTime, Timeout) of
-                true ->
+        {{value, {{FromPid, _} = From, Deadline}}, LeftWaiting} ->
+            case past_deadline(Deadline) of
+                false ->
                     MonitorRef = erlang:monitor(process, FromPid),
                     NewWorker = new_worker(State#state.supervisor),
                     true = ets:insert(Monitors, {NewWorker, MonitorRef}),
                     gen_server:reply(From, NewWorker),
                     State#state{waiting = LeftWaiting};
-                _ ->
+                true ->
                     handle_worker_exit(Pid, State#state{waiting = LeftWaiting})
             end;
         {empty, Empty} when Overflow > 0 ->

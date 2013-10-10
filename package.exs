@@ -5,7 +5,7 @@ Expm.Package.new(
   description: "A hunky Erlang worker pool factory",
   homepage: "http://devintorr.es/poolboy",
   version: version,
-  keywords: ["Erlang", "library", "pool", "pools", "pooler"],
+  keywords: %w(Erlang library pool pools pooler),
   maintainers: [[name: "Devin Torres", email: "devin@devintorr.es"],
                 [name: "Andrew Thompson", email: "andrew@hijacked.us"]],
   repositories: [[github: "devinus/poolboy", tag: version]]
