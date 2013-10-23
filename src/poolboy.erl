@@ -179,6 +179,9 @@ handle_call(get_all_workers, _From, State) ->
 handle_call(get_all_monitors, _From, State) ->
     Monitors = ets:tab2list(State#state.monitors),
     {reply, Monitors, State};
+handle_call(get_all_workers_monitors, _From, State) ->
+    WorkersMonitors = ets:tab2list(State#state.workers_monitors),
+    {reply, WorkersMonitors, State};
 handle_call(stop, _From, State) ->
     Sup = State#state.supervisor,
     true = exit(Sup, shutdown),
@@ -199,9 +202,15 @@ handle_info({'DOWN', Ref, _, _, _}, State) ->
             {noreply, NewState};
         [] ->
             case ets:match(WorkersMonitors, {'$1', Ref}) of
-                [[Pid]] -> %% was it a worker? Then demonitor the worker and get
+                [[Pid]] -> %% was it a worker? Then demonitor the owner and get
                            %% new worker from supervisor.
-                    true = ets:delete(Monitors, Pid),
+                    case ets:lookup(Monitors, Pid) of
+                        [{Pid, AquirerRef}] ->
+                            true = ets:delete(Monitors, Pid),
+                            erlang:demonitor(AquirerRef);
+                        [] ->
+                            ok
+                    end,
                     NewState = handle_worker_exit(Pid, State),
                     {noreply, NewState};
                 _ ->
@@ -240,6 +249,7 @@ new_worker(Sup, FromPid, WorkersMonitors) ->
 dismiss_worker(Sup, Pid, WorkersMonitors) ->
     [{Pid, Ref}] = ets:lookup(WorkersMonitors, Pid),
     erlang:demonitor(Ref),
+    true = ets:delete(WorkersMonitors, Pid),
     supervisor:terminate_child(Sup, Pid).
 
 prepopulate(N, _Sup, _WorkersMonitors) when N < 1 ->
@@ -294,6 +304,7 @@ handle_worker_exit(Pid, State) ->
            monitors = Monitors,
            size = Size,
            overflow = Overflow} = State,
+    true = ets:delete(WorkersMonitors, Pid),
     case queue:out(State#state.waiting) of
         {{value, {{FromPid, _} = From, Deadline}}, LeftWaiting} ->
             case past_deadline(Deadline) of
@@ -325,8 +336,6 @@ handle_worker_exit(Pid, State) ->
                                  queue:in(new_worker(Sup, WorkersMonitors),
                                           FilteredWorkers)
                          end,
-            {true, _} = {queue:len(NewWorkers) =< Size,
-                         {queue:len(NewWorkers), Size}},
             State#state{workers = NewWorkers, waiting = Empty}
     end.
 
