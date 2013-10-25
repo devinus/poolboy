@@ -111,7 +111,13 @@ init({PoolArgs, WorkerArgs}) ->
                                       monitors = Monitors}).
 
 init([{worker_module, Mod} | Rest], WorkerArgs, State) when is_atom(Mod) ->
-    {ok, Sup} = poolboy_sup:start_link(Mod, WorkerArgs),
+    {ok, Sup} = case process_info(self()) of
+                    undefined -> poolboy_sup:start_link(Mod, WorkerArgs);
+                    ProcessInfo ->
+                        PoolboyName = proplists:get_value(registered_name, ProcessInfo),
+                        SupName = list_to_atom(atom_to_list(PoolboyName) ++ "_sup"),
+                        poolboy_sup:start_link({local, SupName}, Mod, WorkerArgs)
+                end,
     init(Rest, WorkerArgs, State#state{supervisor = Sup});
 init([{size, Size} | Rest], WorkerArgs, State) when is_integer(Size) ->
     init(Rest, WorkerArgs, State#state{size = Size});
