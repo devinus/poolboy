@@ -188,12 +188,13 @@ handle_call(_Msg, _From, State) ->
     {reply, Reply, State}.
 
 handle_info({'DOWN', Ref, _, _, _}, State) ->
-    Waiting = queue:filter(fun ({_, R}) -> R =/= Ref end, State#state.waiting),
     case ets:match(State#state.monitors, {'$1', Ref}) of
         [[Pid]] ->
-            NewState = handle_checkin(Pid, State#state{waiting = Waiting}),
+            true = ets:delete(State#state.monitors, Pid),
+            NewState = handle_checkin(Pid, State),
             {noreply, NewState};
         [] ->
+            Waiting = queue:filter(fun ({_, R}) -> R =/= Ref end, State#state.waiting),
             {noreply, State#state{waiting = Waiting}}
     end;
 handle_info({'EXIT', Pid, _Reason}, State) ->
