@@ -32,7 +32,13 @@ checkout(Pool, Block) ->
 -spec checkout(Pool :: node(), Block :: boolean(), Timeout :: timeout())
     -> pid() | full.
 checkout(Pool, Block, Timeout) ->
-    gen_server:call(Pool, {checkout, Block}, Timeout).
+    try
+        gen_server:call(Pool, {checkout, Block}, Timeout)
+    catch
+        Class:Reason ->
+            gen_server:cast(Pool, {cancel_waiting, self()}),
+            erlang:raise(Class, Reason, erlang:get_stacktrace())
+    end.
 
 -spec checkin(Pool :: node(), Worker :: pid()) -> ok.
 checkin(Pool, Worker) when is_pid(Worker) ->
@@ -126,6 +132,10 @@ handle_cast({checkin, Pid}, State = #state{monitors = Monitors}) ->
         [] ->
             {noreply, State}
     end;
+
+handle_cast({cancel_waiting, Pid}, State) ->
+    Waiting = queue:filter(fun ({{P, _}, _}) -> P =/= Pid end, State#state.waiting),
+    {noreply, State#state{waiting = Waiting}};
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
