@@ -94,7 +94,7 @@ child_spec(PoolId, PoolArgs, WorkerArgs) ->
 -spec start(PoolArgs :: proplists:proplist())
     -> start_ret().
 start(PoolArgs) ->
-    start(PoolArgs, PoolArgs).
+    start(PoolArgs, [PoolArgs]).
 
 -spec start(PoolArgs :: proplists:proplist(),
             WorkerArgs:: proplists:proplist())
@@ -106,7 +106,7 @@ start(PoolArgs, WorkerArgs) ->
     -> start_ret().
 start_link(PoolArgs)  ->
     %% for backwards compatability, pass the pool args as the worker args as well
-    start_link(PoolArgs, PoolArgs).
+    start_link(PoolArgs, [PoolArgs]).
 
 -spec start_link(PoolArgs :: proplists:proplist(),
                  WorkerArgs:: proplists:proplist())
