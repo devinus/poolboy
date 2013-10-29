@@ -92,22 +92,30 @@ pool_overflow() ->
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 6)],
     ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(7, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(7, length(?sync(Pid, get_all_workers_monitors))),
     [A, B, C, D, E, F, G] = Workers,
     checkin_worker(Pid, A),
     checkin_worker(Pid, B),
     ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(5, length(?sync(Pid, get_all_workers_monitors))),
     checkin_worker(Pid, C),
+    ?assertEqual(1, length(?sync(Pid, get_avail_workers))),
+    ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(5, length(?sync(Pid, get_all_workers_monitors))),
     checkin_worker(Pid, D),
     ?assertEqual(2, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(5, length(?sync(Pid, get_all_workers_monitors))),
     checkin_worker(Pid, E),
     checkin_worker(Pid, F),
     ?assertEqual(4, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(5, length(?sync(Pid, get_all_workers_monitors))),
     checkin_worker(Pid, G),
     ?assertEqual(5, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(5, length(?sync(Pid, get_all_workers_monitors))),
     ?assertEqual(0, length(?sync(Pid, get_all_monitors))),
     ok = ?sync(Pid, stop).
 
@@ -118,6 +126,7 @@ pool_empty() ->
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 6)],
     ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(7, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(7, length(?sync(Pid, get_all_workers_monitors))),
     [A, B, C, D, E, F, G] = Workers,
     Self = self(),
     spawn(fun() ->
@@ -143,17 +152,21 @@ pool_empty() ->
     end,
     ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(5, length(?sync(Pid, get_all_workers_monitors))),
     checkin_worker(Pid, C),
     checkin_worker(Pid, D),
     ?assertEqual(2, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(5, length(?sync(Pid, get_all_workers_monitors))),
     checkin_worker(Pid, E),
     checkin_worker(Pid, F),
     ?assertEqual(4, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(5, length(?sync(Pid, get_all_workers_monitors))),
     checkin_worker(Pid, G),
     ?assertEqual(5, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(5, length(?sync(Pid, get_all_workers_monitors))),
     ?assertEqual(0, length(?sync(Pid, get_all_monitors))),
     ok = ?sync(Pid, stop).
 
@@ -164,6 +177,7 @@ pool_empty_no_overflow() ->
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 4)],
     ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(5, length(?sync(Pid, get_all_workers_monitors))),
     [A, B, C, D, E] = Workers,
     Self = self(),
     spawn(fun() ->
@@ -189,13 +203,16 @@ pool_empty_no_overflow() ->
     end,
     ?assertEqual(2, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(5, length(?sync(Pid, get_all_workers_monitors))),
     checkin_worker(Pid, C),
     checkin_worker(Pid, D),
     ?assertEqual(4, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(5, length(?sync(Pid, get_all_workers_monitors))),
     checkin_worker(Pid, E),
     ?assertEqual(5, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(5, length(?sync(Pid, get_all_workers_monitors))),
     ?assertEqual(0, length(?sync(Pid, get_all_monitors))),
     ok = ?sync(Pid, stop).
 
@@ -209,6 +226,7 @@ worker_death() ->
     [A, B, C|_Workers] = [poolboy:checkout(Pid) || _ <- lists:seq(0, 6)],
     ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(7, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(7, length(?sync(Pid, get_all_workers_monitors))),
     kill_worker(A),
     ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(6, length(?sync(Pid, get_all_workers))),
@@ -217,6 +235,7 @@ worker_death() ->
     ?assertEqual(1, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(5, length(?sync(Pid, get_all_workers))),
     ?assertEqual(4, length(?sync(Pid, get_all_monitors))),
+    ?assertEqual(5, length(?sync(Pid, get_all_workers_monitors))),
     ok = ?sync(Pid, stop).
 
 worker_death_while_full() ->
@@ -230,6 +249,7 @@ worker_death_while_full() ->
     [A, B|_Workers] = [poolboy:checkout(Pid) || _ <- lists:seq(0, 6)],
     ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(7, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(7, length(?sync(Pid, get_all_workers_monitors))),
     Self = self(),
     spawn(fun() ->
         poolboy:checkout(Pid),
@@ -257,6 +277,7 @@ worker_death_while_full() ->
     kill_worker(B),
     ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(6, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(6, length(?sync(Pid, get_all_workers_monitors))),
     ?assertEqual(6, length(?sync(Pid, get_all_monitors))),
     ok = ?sync(Pid, stop).
 
@@ -271,6 +292,7 @@ worker_death_while_full_no_overflow() ->
     [A, B, C|_Workers] = [poolboy:checkout(Pid) || _ <- lists:seq(0, 4)],
     ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(5, length(?sync(Pid, get_all_workers_monitors))),
     Self = self(),
     spawn(fun() ->
         poolboy:checkout(Pid),
@@ -297,9 +319,11 @@ worker_death_while_full_no_overflow() ->
     kill_worker(B),
     ?assertEqual(1, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(5, length(?sync(Pid, get_all_workers_monitors))),
     kill_worker(C),
     ?assertEqual(2, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(5, length(?sync(Pid, get_all_workers_monitors))),
     ?assertEqual(3, length(?sync(Pid, get_all_monitors))),
     ok = ?sync(Pid, stop).
 
@@ -310,6 +334,7 @@ pool_full_nonblocking_no_overflow() ->
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 4)],
     ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(5, length(?sync(Pid, get_all_workers_monitors))),
     ?assertEqual(full, poolboy:checkout(Pid, false)),
     ?assertEqual(full, poolboy:checkout(Pid, false)),
     A = hd(Workers),
@@ -325,6 +350,7 @@ pool_full_nonblocking() ->
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 9)],
     ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(10, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(10, length(?sync(Pid, get_all_workers_monitors))),
     ?assertEqual(full, poolboy:checkout(Pid, false)),
     A = hd(Workers),
     checkin_worker(Pid, A),
@@ -346,6 +372,7 @@ owner_death() ->
     timer:sleep(1000),
     ?assertEqual(5, length(?sync(Pid, get_avail_workers))),
     ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(5, length(?sync(Pid, get_all_workers_monitors))),
     ?assertEqual(0, length(?sync(Pid, get_all_monitors))),
     ok = ?sync(Pid, stop).
 
