@@ -1,0 +1,10 @@
+{match, [ErtsNumber]} = re:run(erlang:system_info(otp_release), "R(\\d+).+", [{capture, [1], list}]),
+ErtsVsn = erlang:list_to_integer(ErtsNumber),
+if
+    ErtsVsn >= 15 ->
+        OldOpts = proplists:get_value(erl_opts, CONFIG, []),
+        NewOpts = [{d, have_callback_support} | OldOpts],
+        lists:keystore(erl_opts, 1, CONFIG, {erl_opts, NewOpts});
+    true ->
+        CONFIG
+end.
