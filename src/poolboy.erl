@@ -16,9 +16,9 @@
     workers :: queue(),
     waiting :: queue(),
     monitors :: ets:tid(),
-    size = 0 :: non_neg_integer(),
+    size = 5 :: non_neg_integer(),
     overflow = 0 :: non_neg_integer(),
-    max_overflow = 0 :: non_neg_integer()
+    max_overflow = 10 :: non_neg_integer()
 }).
 
 -spec checkout(Pool :: node()) -> pid().
@@ -73,25 +73,25 @@ child_spec(Pool, PoolArgs, WorkerArgs) ->
      permanent, 5000, worker, [poolboy]}.
 
 -spec start(PoolArgs :: proplists:proplist())
-    -> {ok, pid()}.
+    -> gen:start_ret().
 start(PoolArgs) ->
     start(PoolArgs, PoolArgs).
 
 -spec start(PoolArgs :: proplists:proplist(),
             WorkerArgs:: proplists:proplist())
-    -> {ok, pid()}.
+    -> gen:start_ret().
 start(PoolArgs, WorkerArgs) ->
     start_pool(start, PoolArgs, WorkerArgs).
 
 -spec start_link(PoolArgs :: proplists:proplist())
-    -> {ok, pid()}.
+    -> gen:start_ret().
 start_link(PoolArgs)  ->
     %% for backwards compatability, pass the pool args as the worker args as well
     start_link(PoolArgs, PoolArgs).
 
 -spec start_link(PoolArgs :: proplists:proplist(),
                  WorkerArgs:: proplists:proplist())
-    -> {ok, pid()}.
+    -> gen:start_ret().
 start_link(PoolArgs, WorkerArgs)  ->
     start_pool(start_link, PoolArgs, WorkerArgs).
 
@@ -252,7 +252,7 @@ prepopulate(N, _Sup) when N < 1 ->
 prepopulate(N, Sup) ->
     prepopulate(N, Sup, queue:new()).
 
-prepopulate(0, _Sup, Workers) ->
+prepopulate(N, _Sup, Workers) when N < 1 ->
     Workers;
 prepopulate(N, Sup, Workers) ->
     prepopulate(N-1, Sup, queue:in(new_worker(Sup), Workers)).
