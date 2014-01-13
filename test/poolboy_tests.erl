@@ -2,9 +2,6 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
--define(sync(Pid, Event),
-    gen_server:call(Pid, Event)).
-
 pool_test_() ->
     {foreach,
         fun() ->
@@ -13,7 +10,7 @@ pool_test_() ->
         fun(_) ->
             case whereis(poolboy_test) of
                 undefined -> ok;
-                Pid -> ?sync(Pid, stop)
+                Pid -> pool_call(Pid, stop)
             end,
             error_logger:tty(true)
         end,
@@ -60,7 +57,7 @@ pool_test_() ->
 %% Tell a worker to exit and await its impending doom.
 kill_worker(Pid) ->
     erlang:monitor(process, Pid),
-    gen_server:call(Pid, die),
+    pool_call(Pid, die),
     receive
         {'DOWN', _, process, Pid, _} ->
             ok
@@ -76,48 +73,48 @@ checkin_worker(Pid, Worker) ->
 pool_startup() ->
     %% Check basic pool operation.
     {ok, Pid} = new_pool(10, 5),
-    ?assertEqual(10, length(?sync(Pid, get_avail_workers))),
+    ?assertEqual(10, length(pool_call(Pid, get_avail_workers))),
     poolboy:checkout(Pid),
-    ?assertEqual(9, length(?sync(Pid, get_avail_workers))),
+    ?assertEqual(9, length(pool_call(Pid, get_avail_workers))),
     Worker = poolboy:checkout(Pid),
-    ?assertEqual(8, length(?sync(Pid, get_avail_workers))),
+    ?assertEqual(8, length(pool_call(Pid, get_avail_workers))),
     checkin_worker(Pid, Worker),
-    ?assertEqual(9, length(?sync(Pid, get_avail_workers))),
-    ?assertEqual(1, length(?sync(Pid, get_all_monitors))),
-    ok = ?sync(Pid, stop).
+    ?assertEqual(9, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(1, length(pool_call(Pid, get_all_monitors))),
+    ok = pool_call(Pid, stop).
 
 pool_overflow() ->
     %% Check that the pool overflows properly.
     {ok, Pid} = new_pool(5, 5),
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 6)],
-    ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
-    ?assertEqual(7, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(7, length(pool_call(Pid, get_all_workers))),
     [A, B, C, D, E, F, G] = Workers,
     checkin_worker(Pid, A),
     checkin_worker(Pid, B),
-    ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
-    ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
     checkin_worker(Pid, C),
     checkin_worker(Pid, D),
-    ?assertEqual(2, length(?sync(Pid, get_avail_workers))),
-    ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(2, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
     checkin_worker(Pid, E),
     checkin_worker(Pid, F),
-    ?assertEqual(4, length(?sync(Pid, get_avail_workers))),
-    ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(4, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
     checkin_worker(Pid, G),
-    ?assertEqual(5, length(?sync(Pid, get_avail_workers))),
-    ?assertEqual(5, length(?sync(Pid, get_all_workers))),
-    ?assertEqual(0, length(?sync(Pid, get_all_monitors))),
-    ok = ?sync(Pid, stop).
+    ?assertEqual(5, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
+    ?assertEqual(0, length(pool_call(Pid, get_all_monitors))),
+    ok = pool_call(Pid, stop).
 
 pool_empty() ->
     %% Checks that the the pool handles the empty condition correctly when
     %% overflow is enabled.
     {ok, Pid} = new_pool(5, 2),
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 6)],
-    ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
-    ?assertEqual(7, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(7, length(pool_call(Pid, get_all_workers))),
     [A, B, C, D, E, F, G] = Workers,
     Self = self(),
     spawn(fun() ->
@@ -141,29 +138,29 @@ pool_empty() ->
     after
         500 -> ?assert(false)
     end,
-    ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
-    ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
     checkin_worker(Pid, C),
     checkin_worker(Pid, D),
-    ?assertEqual(2, length(?sync(Pid, get_avail_workers))),
-    ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(2, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
     checkin_worker(Pid, E),
     checkin_worker(Pid, F),
-    ?assertEqual(4, length(?sync(Pid, get_avail_workers))),
-    ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(4, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
     checkin_worker(Pid, G),
-    ?assertEqual(5, length(?sync(Pid, get_avail_workers))),
-    ?assertEqual(5, length(?sync(Pid, get_all_workers))),
-    ?assertEqual(0, length(?sync(Pid, get_all_monitors))),
-    ok = ?sync(Pid, stop).
+    ?assertEqual(5, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
+    ?assertEqual(0, length(pool_call(Pid, get_all_monitors))),
+    ok = pool_call(Pid, stop).
 
 pool_empty_no_overflow() ->
     %% Checks the pool handles the empty condition properly when overflow is
     %% disabled.
     {ok, Pid} = new_pool(5, 0),
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 4)],
-    ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
-    ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
     [A, B, C, D, E] = Workers,
     Self = self(),
     spawn(fun() ->
@@ -187,17 +184,17 @@ pool_empty_no_overflow() ->
     after
         500 -> ?assert(false)
     end,
-    ?assertEqual(2, length(?sync(Pid, get_avail_workers))),
-    ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(2, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
     checkin_worker(Pid, C),
     checkin_worker(Pid, D),
-    ?assertEqual(4, length(?sync(Pid, get_avail_workers))),
-    ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(4, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
     checkin_worker(Pid, E),
-    ?assertEqual(5, length(?sync(Pid, get_avail_workers))),
-    ?assertEqual(5, length(?sync(Pid, get_all_workers))),
-    ?assertEqual(0, length(?sync(Pid, get_all_monitors))),
-    ok = ?sync(Pid, stop).
+    ?assertEqual(5, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
+    ?assertEqual(0, length(pool_call(Pid, get_all_monitors))),
+    ok = pool_call(Pid, stop).
 
 worker_death() ->
     %% Check that dead workers are only restarted when the pool is not full
@@ -205,19 +202,19 @@ worker_death() ->
     {ok, Pid} = new_pool(5, 2),
     Worker = poolboy:checkout(Pid),
     kill_worker(Worker),
-    ?assertEqual(5, length(?sync(Pid, get_avail_workers))),
+    ?assertEqual(5, length(pool_call(Pid, get_avail_workers))),
     [A, B, C|_Workers] = [poolboy:checkout(Pid) || _ <- lists:seq(0, 6)],
-    ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
-    ?assertEqual(7, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(7, length(pool_call(Pid, get_all_workers))),
     kill_worker(A),
-    ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
-    ?assertEqual(6, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(6, length(pool_call(Pid, get_all_workers))),
     kill_worker(B),
     kill_worker(C),
-    ?assertEqual(1, length(?sync(Pid, get_avail_workers))),
-    ?assertEqual(5, length(?sync(Pid, get_all_workers))),
-    ?assertEqual(4, length(?sync(Pid, get_all_monitors))),
-    ok = ?sync(Pid, stop).
+    ?assertEqual(1, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
+    ?assertEqual(4, length(pool_call(Pid, get_all_monitors))),
+    ok = pool_call(Pid, stop).
 
 worker_death_while_full() ->
     %% Check that if a worker dies while the pool is full and there is a
@@ -226,10 +223,10 @@ worker_death_while_full() ->
     {ok, Pid} = new_pool(5, 2),
     Worker = poolboy:checkout(Pid),
     kill_worker(Worker),
-    ?assertEqual(5, length(?sync(Pid, get_avail_workers))),
+    ?assertEqual(5, length(pool_call(Pid, get_avail_workers))),
     [A, B|_Workers] = [poolboy:checkout(Pid) || _ <- lists:seq(0, 6)],
-    ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
-    ?assertEqual(7, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(7, length(pool_call(Pid, get_all_workers))),
     Self = self(),
     spawn(fun() ->
         poolboy:checkout(Pid),
@@ -255,10 +252,10 @@ worker_death_while_full() ->
         1000 -> ?assert(false)
     end,
     kill_worker(B),
-    ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
-    ?assertEqual(6, length(?sync(Pid, get_all_workers))),
-    ?assertEqual(6, length(?sync(Pid, get_all_monitors))),
-    ok = ?sync(Pid, stop).
+    ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(6, length(pool_call(Pid, get_all_workers))),
+    ?assertEqual(6, length(pool_call(Pid, get_all_monitors))),
+    ok = pool_call(Pid, stop).
 
 worker_death_while_full_no_overflow() ->
     %% Check that if a worker dies while the pool is full and there's no
@@ -267,10 +264,10 @@ worker_death_while_full_no_overflow() ->
     {ok, Pid} = new_pool(5, 0),
     Worker = poolboy:checkout(Pid),
     kill_worker(Worker),
-    ?assertEqual(5, length(?sync(Pid, get_avail_workers))),
+    ?assertEqual(5, length(pool_call(Pid, get_avail_workers))),
     [A, B, C|_Workers] = [poolboy:checkout(Pid) || _ <- lists:seq(0, 4)],
-    ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
-    ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
     Self = self(),
     spawn(fun() ->
         poolboy:checkout(Pid),
@@ -295,36 +292,36 @@ worker_death_while_full_no_overflow() ->
         1000 -> ?assert(false)
     end,
     kill_worker(B),
-    ?assertEqual(1, length(?sync(Pid, get_avail_workers))),
-    ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(1, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
     kill_worker(C),
-    ?assertEqual(2, length(?sync(Pid, get_avail_workers))),
-    ?assertEqual(5, length(?sync(Pid, get_all_workers))),
-    ?assertEqual(3, length(?sync(Pid, get_all_monitors))),
-    ok = ?sync(Pid, stop).
+    ?assertEqual(2, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
+    ?assertEqual(3, length(pool_call(Pid, get_all_monitors))),
+    ok = pool_call(Pid, stop).
 
 pool_full_nonblocking_no_overflow() ->
     %% Check that when the pool is full, checkouts return 'full' when the
     %% option to use non-blocking checkouts is used.
     {ok, Pid} = new_pool(5, 0),
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 4)],
-    ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
-    ?assertEqual(5, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
     ?assertEqual(full, poolboy:checkout(Pid, false)),
     ?assertEqual(full, poolboy:checkout(Pid, false)),
     A = hd(Workers),
     checkin_worker(Pid, A),
     ?assertEqual(A, poolboy:checkout(Pid)),
-    ?assertEqual(5, length(?sync(Pid, get_all_monitors))),
-    ok = ?sync(Pid, stop).
+    ?assertEqual(5, length(pool_call(Pid, get_all_monitors))),
+    ok = pool_call(Pid, stop).
 
 pool_full_nonblocking() ->
     %% Check that when the pool is full, checkouts return 'full' when the
     %% option to use non-blocking checkouts is used.
     {ok, Pid} = new_pool(5, 5),
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 9)],
-    ?assertEqual(0, length(?sync(Pid, get_avail_workers))),
-    ?assertEqual(10, length(?sync(Pid, get_all_workers))),
+    ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(10, length(pool_call(Pid, get_all_workers))),
     ?assertEqual(full, poolboy:checkout(Pid, false)),
     A = hd(Workers),
     checkin_worker(Pid, A),
@@ -332,8 +329,8 @@ pool_full_nonblocking() ->
     ?assertEqual(false, is_process_alive(A)), %% Overflow workers get shutdown
     ?assert(is_pid(NewWorker)),
     ?assertEqual(full, poolboy:checkout(Pid, false)),
-    ?assertEqual(10, length(?sync(Pid, get_all_monitors))),
-    ok = ?sync(Pid, stop).
+    ?assertEqual(10, length(pool_call(Pid, get_all_monitors))),
+    ok = pool_call(Pid, stop).
 
 owner_death() ->
     %% Check that a dead owner (a process that dies with a worker checked out)
@@ -344,17 +341,17 @@ owner_death() ->
         receive after 500 -> exit(normal) end
     end),
     timer:sleep(1000),
-    ?assertEqual(5, length(?sync(Pid, get_avail_workers))),
-    ?assertEqual(5, length(?sync(Pid, get_all_workers))),
-    ?assertEqual(0, length(?sync(Pid, get_all_monitors))),
-    ok = ?sync(Pid, stop).
+    ?assertEqual(5, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
+    ?assertEqual(0, length(pool_call(Pid, get_all_monitors))),
+    ok = pool_call(Pid, stop).
 
 checkin_after_exception_in_transaction() ->
     {ok, Pool} = new_pool(2, 0),
-    ?assertEqual(2, length(?sync(Pool, get_avail_workers))),
+    ?assertEqual(2, length(pool_call(Pool, get_avail_workers))),
     Tx = fun(Worker) ->
         ?assert(is_pid(Worker)),
-        ?assertEqual(1, length(?sync(Pool, get_avail_workers))),
+        ?assertEqual(1, length(pool_call(Pool, get_avail_workers))),
         throw(it_on_the_ground),
         ?assert(false)
     end,
@@ -363,8 +360,8 @@ checkin_after_exception_in_transaction() ->
     catch
         throw:it_on_the_ground -> ok
     end,
-    ?assertEqual(2, length(?sync(Pool, get_avail_workers))),
-    ok = ?sync(Pool, stop).
+    ?assertEqual(2, length(pool_call(Pool, get_avail_workers))),
+    ok = pool_call(Pool, stop).
 
 pool_returns_status() ->
     {ok, Pool} = new_pool(2, 0),
@@ -373,7 +370,7 @@ pool_returns_status() ->
     ?assertEqual({ready, 1, 0, 1}, poolboy:status(Pool)),
     poolboy:checkout(Pool),
     ?assertEqual({full, 0, 0, 2}, poolboy:status(Pool)),
-    ok = ?sync(Pool, stop),
+    ok = pool_call(Pool, stop),
 
     {ok, Pool2} = new_pool(1, 1),
     ?assertEqual({ready, 1, 0, 0}, poolboy:status(Pool2)),
@@ -381,7 +378,7 @@ pool_returns_status() ->
     ?assertEqual({overflow, 0, 0, 1}, poolboy:status(Pool2)),
     poolboy:checkout(Pool2),
     ?assertEqual({full, 0, 1, 2}, poolboy:status(Pool2)),
-    ok = ?sync(Pool2, stop),
+    ok = pool_call(Pool2, stop),
 
     {ok, Pool3} = new_pool(0, 2),
     ?assertEqual({overflow, 0, 0, 0}, poolboy:status(Pool3)),
@@ -389,13 +386,16 @@ pool_returns_status() ->
     ?assertEqual({overflow, 0, 1, 1}, poolboy:status(Pool3)),
     poolboy:checkout(Pool3),
     ?assertEqual({full, 0, 2, 2}, poolboy:status(Pool3)),
-    ok = ?sync(Pool3, stop),
+    ok = pool_call(Pool3, stop),
 
     {ok, Pool4} = new_pool(0, 0),
     ?assertEqual({full, 0, 0, 0}, poolboy:status(Pool4)),
-    ok = ?sync(Pool4, stop).
+    ok = pool_call(Pool4, stop).
 
 new_pool(Size, MaxOverflow) ->
     poolboy:start_link([{name, {local, poolboy_test}},
                         {worker_module, poolboy_test_worker},
                         {size, Size}, {max_overflow, MaxOverflow}]).
+
+pool_call(ServerRef, Request) ->
+    pool_call(ServerRef, Request).
