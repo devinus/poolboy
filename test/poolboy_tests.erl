@@ -398,4 +398,4 @@ new_pool(Size, MaxOverflow) ->
                         {size, Size}, {max_overflow, MaxOverflow}]).
 
 pool_call(ServerRef, Request) ->
-    pool_call(ServerRef, Request).
+    gen_server:call(ServerRef, Request).
