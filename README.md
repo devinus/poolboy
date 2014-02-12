@@ -162,3 +162,7 @@ code_change(_OldVsn, State, _Extra) ->
 Poolboy is available in the public domain (see `UNLICENSE`).
 Poolboy is also optionally available under the Apache License (see `LICENSE`),
 meant especially for jurisdictions that do not recognize public domain works.
+
+
+[![Bitdeli Badge](https://d2weczhvl823v0.cloudfront.net/devinus/poolboy/trend.png)](https://bitdeli.com/free "Bitdeli Badge")
+
