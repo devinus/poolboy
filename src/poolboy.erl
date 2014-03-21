@@ -21,15 +21,15 @@
     max_overflow = 10 :: non_neg_integer()
 }).
 
--spec checkout(Pool :: node()) -> pid().
+-spec checkout(Pool :: pid()) -> pid().
 checkout(Pool) ->
     checkout(Pool, true).
 
--spec checkout(Pool :: node(), Block :: boolean()) -> pid() | full.
+-spec checkout(Pool :: pid(), Block :: boolean()) -> pid() | full.
 checkout(Pool, Block) ->
     checkout(Pool, Block, ?TIMEOUT).
 
--spec checkout(Pool :: node(), Block :: boolean(), Timeout :: timeout())
+-spec checkout(Pool :: pid(), Block :: boolean(), Timeout :: timeout())
     -> pid() | full.
 checkout(Pool, Block, Timeout) ->
     try
@@ -40,16 +40,16 @@ checkout(Pool, Block, Timeout) ->
             erlang:raise(Class, Reason, erlang:get_stacktrace())
     end.
 
--spec checkin(Pool :: node(), Worker :: pid()) -> ok.
+-spec checkin(Pool :: pid(), Worker :: pid()) -> ok.
 checkin(Pool, Worker) when is_pid(Worker) ->
     gen_server:cast(Pool, {checkin, Worker}).
 
--spec transaction(Pool :: node(), Fun :: fun((Worker :: pid()) -> any()))
+-spec transaction(Pool :: pid(), Fun :: fun((Worker :: pid()) -> any()))
     -> any().
 transaction(Pool, Fun) ->
     transaction(Pool, Fun, ?TIMEOUT).
 
--spec transaction(Pool :: node(), Fun :: fun((Worker :: pid()) -> any()), 
+-spec transaction(Pool :: pid(), Fun :: fun((Worker :: pid()) -> any()), 
     Timeout :: timeout()) -> any().
 transaction(Pool, Fun, Timeout) ->
     Worker = poolboy:checkout(Pool, true, Timeout),
@@ -59,12 +59,12 @@ transaction(Pool, Fun, Timeout) ->
         ok = poolboy:checkin(Pool, Worker)
     end.
 
--spec child_spec(Pool :: node(), PoolArgs :: proplists:proplist())
+-spec child_spec(Pool :: pid(), PoolArgs :: proplists:proplist())
     -> supervisor:child_spec().
 child_spec(Pool, PoolArgs) ->
     child_spec(Pool, PoolArgs, []).
 
--spec child_spec(Pool :: node(),
+-spec child_spec(Pool :: pid(),
                  PoolArgs :: proplists:proplist(),
                  WorkerArgs :: proplists:proplist())
     -> supervisor:child_spec().
@@ -95,11 +95,11 @@ start_link(PoolArgs)  ->
 start_link(PoolArgs, WorkerArgs)  ->
     start_pool(start_link, PoolArgs, WorkerArgs).
 
--spec stop(Pool :: node()) -> ok.
+-spec stop(Pool :: pid()) -> ok.
 stop(Pool) ->
     gen_server:call(Pool, stop).
 
--spec status(Pool :: node()) -> {atom(), integer(), integer(), integer()}.
+-spec status(Pool :: pid()) -> {atom(), integer(), integer(), integer()}.
 status(Pool) ->
     gen_server:call(Pool, status).
 
