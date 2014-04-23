@@ -21,15 +21,21 @@
     max_overflow = 10 :: non_neg_integer()
 }).
 
--spec checkout(Pool :: pid()) -> pid().
+%% gen_server's ServerRef type from call/2
+-type serverref() :: atom() |
+		     {atom(), node()} |
+		     {global, atom()} |
+		     pid().
+
+-spec checkout(Pool :: serverref()) -> pid().
 checkout(Pool) ->
     checkout(Pool, true).
 
--spec checkout(Pool :: pid(), Block :: boolean()) -> pid() | full.
+-spec checkout(Pool :: serverref(), Block :: boolean()) -> pid() | full.
 checkout(Pool, Block) ->
     checkout(Pool, Block, ?TIMEOUT).
 
--spec checkout(Pool :: pid(), Block :: boolean(), Timeout :: timeout())
+-spec checkout(Pool :: serverref(), Block :: boolean(), Timeout :: timeout())
     -> pid() | full.
 checkout(Pool, Block, Timeout) ->
     try
@@ -40,16 +46,16 @@ checkout(Pool, Block, Timeout) ->
             erlang:raise(Class, Reason, erlang:get_stacktrace())
     end.
 
--spec checkin(Pool :: pid(), Worker :: pid()) -> ok.
+-spec checkin(Pool :: serverref(), Worker :: pid()) -> ok.
 checkin(Pool, Worker) when is_pid(Worker) ->
     gen_server:cast(Pool, {checkin, Worker}).
 
--spec transaction(Pool :: pid(), Fun :: fun((Worker :: pid()) -> any()))
+-spec transaction(Pool :: serverref(), Fun :: fun((Worker :: pid()) -> any()))
     -> any().
 transaction(Pool, Fun) ->
     transaction(Pool, Fun, ?TIMEOUT).
 
--spec transaction(Pool :: pid(), Fun :: fun((Worker :: pid()) -> any()), 
+-spec transaction(Pool :: serverref(), Fun :: fun((Worker :: pid()) -> any()), 
     Timeout :: timeout()) -> any().
 transaction(Pool, Fun, Timeout) ->
     Worker = poolboy:checkout(Pool, true, Timeout),
@@ -59,12 +65,12 @@ transaction(Pool, Fun, Timeout) ->
         ok = poolboy:checkin(Pool, Worker)
     end.
 
--spec child_spec(Pool :: pid(), PoolArgs :: proplists:proplist())
+-spec child_spec(Pool :: serverref(), PoolArgs :: proplists:proplist())
     -> supervisor:child_spec().
 child_spec(Pool, PoolArgs) ->
     child_spec(Pool, PoolArgs, []).
 
--spec child_spec(Pool :: pid(),
+-spec child_spec(Pool :: serverref(),
                  PoolArgs :: proplists:proplist(),
                  WorkerArgs :: proplists:proplist())
     -> supervisor:child_spec().
@@ -95,11 +101,11 @@ start_link(PoolArgs)  ->
 start_link(PoolArgs, WorkerArgs)  ->
     start_pool(start_link, PoolArgs, WorkerArgs).
 
--spec stop(Pool :: pid()) -> ok.
+-spec stop(Pool :: serverref()) -> ok.
 stop(Pool) ->
     gen_server:call(Pool, stop).
 
--spec status(Pool :: pid()) -> {atom(), integer(), integer(), integer()}.
+-spec status(Pool :: serverref()) -> {atom(), integer(), integer(), integer()}.
 status(Pool) ->
     gen_server:call(Pool, status).
 
