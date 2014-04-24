@@ -1,12 +1,19 @@
-version = String.strip(File.read!("VERSION"))
+defmodule Poolboy.Mixfile do
+  use Mix.Project
 
-Expm.Package.new(
-  name: "poolboy",
-  description: "A hunky Erlang worker pool factory",
-  homepage: "http://devintorr.es/poolboy",
-  version: version,
-  keywords: %w(Erlang library pool pools pooler),
-  maintainers: [[name: "Devin Torres", email: "devin@devintorr.es"],
-                [name: "Andrew Thompson", email: "andrew@hijacked.us"]],
-  repositories: [[github: "devinus/poolboy", tag: version]]
-)
+  @version File.read!("VERSION") |> String.strip
+
+  def project do
+    [app: :poolboy,
+     version: @version,
+     description: "A hunky Erlang worker pool factory",
+     package: package]
+  end
+
+  defp package do
+    [files: ~w(src rebar.config README.md LICENSE UNLICENSE),
+     contributors: ["Devin Torres", "Andrew Thompson", "Kurt Williams"],
+     licenses: ["Unlicense", "Apache 2.0"],
+     links: [{"GitHub", "https://github.com/devinus/poolboy"}]]
+  end
+end
