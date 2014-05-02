@@ -13,7 +13,7 @@
 
 -record(state, {
     supervisor :: pid(),
-    workers :: queue(),
+    workers :: [pid()],
     waiting :: queue(),
     monitors :: ets:tid(),
     size = 5 :: non_neg_integer(),
@@ -146,21 +146,21 @@ handle_call({checkout, Block}, {FromPid, _} = From, State) ->
            monitors = Monitors,
            overflow = Overflow,
            max_overflow = MaxOverflow} = State,
-    case queue:out(Workers) of
-        {{value, Pid}, Left} ->
+    case Workers of
+        [Pid | Left ] ->
             Ref = erlang:monitor(process, FromPid),
             true = ets:insert(Monitors, {Pid, Ref}),
             {reply, Pid, State#state{workers = Left}};
-        {empty, Empty} when MaxOverflow > 0, Overflow < MaxOverflow ->
+        [] when MaxOverflow > 0, Overflow < MaxOverflow ->
             {Pid, Ref} = new_worker(Sup, FromPid),
             true = ets:insert(Monitors, {Pid, Ref}),
-            {reply, Pid, State#state{workers = Empty, overflow = Overflow + 1}};
-        {empty, Empty} when Block =:= false ->
-            {reply, full, State#state{workers = Empty}};
-        {empty, Empty} ->
+            {reply, Pid, State#state{overflow = Overflow + 1}};
+        [] when Block =:= false ->
+            {reply, full, State};
+        [] ->
             Ref = erlang:monitor(process, FromPid),
             Waiting = queue:in({From, Ref}, State#state.waiting),
-            {noreply, State#state{workers = Empty, waiting = Waiting}}
+            {noreply, State#state{waiting = Waiting}}
     end;
 
 handle_call(status, _From, State) ->
@@ -168,11 +168,10 @@ handle_call(status, _From, State) ->
            monitors = Monitors,
            overflow = Overflow} = State,
     StateName = state_name(State),
-    {reply, {StateName, queue:len(Workers), Overflow, ets:info(Monitors, size)}, State};
+    {reply, {StateName, length(Workers), Overflow, ets:info(Monitors, size)}, State};
 handle_call(get_avail_workers, _From, State) ->
     Workers = State#state.workers,
-    WorkerList = queue:to_list(Workers),
-    {reply, WorkerList, State};
+    {reply, Workers, State};
 handle_call(get_all_workers, _From, State) ->
     Sup = State#state.supervisor,
     WorkerList = supervisor:which_children(Sup),
@@ -207,10 +206,10 @@ handle_info({'EXIT', Pid, _Reason}, State) ->
             NewState = handle_worker_exit(Pid, State),
             {noreply, NewState};
         [] ->
-            case queue:member(Pid, State#state.workers) of
+            case lists:member(Pid, State#state.workers) of
                 true ->
-                    W = queue:filter(fun (P) -> P =/= Pid end, State#state.workers),
-                    {noreply, State#state{workers = queue:in(new_worker(Sup), W)}};
+                    W = lists:filter(fun (P) -> P =/= Pid end, State#state.workers),
+                    {noreply, State#state{workers = [new_worker(Sup) | W]}};
                 false ->
                     {noreply, State}
             end
@@ -248,14 +247,14 @@ dismiss_worker(Sup, Pid) ->
     supervisor:terminate_child(Sup, Pid).
 
 prepopulate(N, _Sup) when N < 1 ->
-    queue:new();
+    [];
 prepopulate(N, Sup) ->
-    prepopulate(N, Sup, queue:new()).
+    prepopulate(N, Sup, []).
 
-prepopulate(N, _Sup, Workers) when N < 1 ->
+prepopulate(0, _Sup, Workers) ->
     Workers;
 prepopulate(N, Sup, Workers) ->
-    prepopulate(N-1, Sup, queue:in(new_worker(Sup), Workers)).
+    prepopulate(N-1, Sup, [new_worker(Sup) | Workers]).
 
 handle_checkin(Pid, State) ->
     #state{supervisor = Sup,
@@ -272,7 +271,7 @@ handle_checkin(Pid, State) ->
             ok = dismiss_worker(Sup, Pid),
             State#state{waiting = Empty, overflow = Overflow - 1};
         {empty, Empty} ->
-            Workers = queue:in(Pid, State#state.workers),
+            Workers = [Pid | State#state.workers],
             State#state{workers = Workers, waiting = Empty, overflow = 0}
     end.
 
@@ -290,16 +289,15 @@ handle_worker_exit(Pid, State) ->
         {empty, Empty} when Overflow > 0 ->
             State#state{overflow = Overflow - 1, waiting = Empty};
         {empty, Empty} ->
-            Workers = queue:in(
-                new_worker(Sup),
-                queue:filter(fun (P) -> P =/= Pid end, State#state.workers)
-            ),
+            Workers =
+                [new_worker(Sup)
+                 | lists:filter(fun (P) -> P =/= Pid end, State#state.workers)],
             State#state{workers = Workers, waiting = Empty}
     end.
 
 state_name(State = #state{overflow = Overflow}) when Overflow < 1 ->
     #state{max_overflow = MaxOverflow, workers = Workers} = State,
-    case queue:len(Workers) == 0 of
+    case length(Workers) == 0 of
         true when MaxOverflow < 1 -> full;
         true -> overflow;
         false -> ready
