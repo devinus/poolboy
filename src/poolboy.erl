@@ -11,10 +11,16 @@
 
 -define(TIMEOUT, 5000).
 
+-ifdef(pre17).
+-type pid_queue() :: queue().
+-else.
+-type pid_queue() :: queue:queue().
+-endif.
+
 -record(state, {
     supervisor :: pid(),
     workers :: [pid()],
-    waiting :: queue(),
+    waiting :: pid_queue(),
     monitors :: ets:tid(),
     size = 5 :: non_neg_integer(),
     overflow = 0 :: non_neg_integer(),
@@ -49,7 +55,7 @@ checkin(Pool, Worker) when is_pid(Worker) ->
 transaction(Pool, Fun) ->
     transaction(Pool, Fun, ?TIMEOUT).
 
--spec transaction(Pool :: node(), Fun :: fun((Worker :: pid()) -> any()), 
+-spec transaction(Pool :: node(), Fun :: fun((Worker :: pid()) -> any()),
     Timeout :: timeout()) -> any().
 transaction(Pool, Fun, Timeout) ->
     Worker = poolboy:checkout(Pool, true, Timeout),
@@ -147,7 +153,7 @@ handle_call({checkout, Block}, {FromPid, _} = From, State) ->
            overflow = Overflow,
            max_overflow = MaxOverflow} = State,
     case Workers of
-        [Pid | Left ] ->
+        [Pid | Left] ->
             Ref = erlang:monitor(process, FromPid),
             true = ets:insert(Monitors, {Pid, Ref}),
             {reply, Pid, State#state{workers = Left}};
