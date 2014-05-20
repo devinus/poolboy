@@ -72,17 +72,17 @@ transaction(Pool, Fun, Timeout) ->
         ok = poolboy:checkin(Pool, Worker)
     end.
 
--spec child_spec(Pool :: node(), PoolArgs :: proplists:proplist())
+-spec child_spec(PoolId :: term(), PoolArgs :: proplists:proplist())
     -> supervisor:child_spec().
-child_spec(Pool, PoolArgs) ->
-    child_spec(Pool, PoolArgs, []).
+child_spec(PoolId, PoolArgs) ->
+    child_spec(PoolId, PoolArgs, []).
 
--spec child_spec(Pool :: node(),
+-spec child_spec(PoolId :: term(),
                  PoolArgs :: proplists:proplist(),
                  WorkerArgs :: proplists:proplist())
     -> supervisor:child_spec().
-child_spec(Pool, PoolArgs, WorkerArgs) ->
-    {Pool, {poolboy, start_link, [PoolArgs, WorkerArgs]},
+child_spec(PoolId, PoolArgs, WorkerArgs) ->
+    {PoolId, {poolboy, start_link, [PoolArgs, WorkerArgs]},
      permanent, 5000, worker, [poolboy]}.
 
 -spec start(PoolArgs :: proplists:proplist())
