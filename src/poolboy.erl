@@ -17,6 +17,13 @@
 -type pid_queue() :: queue:queue().
 -endif.
 
+-type pool() ::
+    Name :: atom() |
+    {Name :: atom(), node()} |
+    {local, Name :: atom()} |
+    {global, GlobalName :: any()} |
+    {via, Module :: atom(), ViaName :: any()}.
+
 -record(state, {
     supervisor :: pid(),
     workers :: [pid()],
@@ -27,15 +34,15 @@
     max_overflow = 10 :: non_neg_integer()
 }).
 
--spec checkout(Pool :: node()) -> pid().
+-spec checkout(Pool :: pool()) -> pid().
 checkout(Pool) ->
     checkout(Pool, true).
 
--spec checkout(Pool :: node(), Block :: boolean()) -> pid() | full.
+-spec checkout(Pool :: pool(), Block :: boolean()) -> pid() | full.
 checkout(Pool, Block) ->
     checkout(Pool, Block, ?TIMEOUT).
 
--spec checkout(Pool :: node(), Block :: boolean(), Timeout :: timeout())
+-spec checkout(Pool :: pool(), Block :: boolean(), Timeout :: timeout())
     -> pid() | full.
 checkout(Pool, Block, Timeout) ->
     try
@@ -46,16 +53,16 @@ checkout(Pool, Block, Timeout) ->
             erlang:raise(Class, Reason, erlang:get_stacktrace())
     end.
 
--spec checkin(Pool :: node(), Worker :: pid()) -> ok.
+-spec checkin(Pool :: pool(), Worker :: pid()) -> ok.
 checkin(Pool, Worker) when is_pid(Worker) ->
     gen_server:cast(Pool, {checkin, Worker}).
 
--spec transaction(Pool :: node(), Fun :: fun((Worker :: pid()) -> any()))
+-spec transaction(Pool :: pool(), Fun :: fun((Worker :: pid()) -> any()))
     -> any().
 transaction(Pool, Fun) ->
     transaction(Pool, Fun, ?TIMEOUT).
 
--spec transaction(Pool :: node(), Fun :: fun((Worker :: pid()) -> any()),
+-spec transaction(Pool :: pool(), Fun :: fun((Worker :: pid()) -> any()),
     Timeout :: timeout()) -> any().
 transaction(Pool, Fun, Timeout) ->
     Worker = poolboy:checkout(Pool, true, Timeout),
@@ -101,11 +108,11 @@ start_link(PoolArgs)  ->
 start_link(PoolArgs, WorkerArgs)  ->
     start_pool(start_link, PoolArgs, WorkerArgs).
 
--spec stop(Pool :: node()) -> ok.
+-spec stop(Pool :: pool()) -> ok.
 stop(Pool) ->
     gen_server:call(Pool, stop).
 
--spec status(Pool :: node()) -> {atom(), integer(), integer(), integer()}.
+-spec status(Pool :: pool()) -> {atom(), integer(), integer(), integer()}.
 status(Pool) ->
     gen_server:call(Pool, status).
 
