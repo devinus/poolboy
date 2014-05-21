@@ -24,6 +24,9 @@
     {global, GlobalName :: any()} |
     {via, Module :: atom(), ViaName :: any()}.
 
+% Copied from gen:start_ret/0
+-type start_ret() :: {'ok', pid()} | 'ignore' | {'error', term()}.
+
 -record(state, {
     supervisor :: pid(),
     workers :: [pid()],
@@ -86,25 +89,25 @@ child_spec(PoolId, PoolArgs, WorkerArgs) ->
      permanent, 5000, worker, [poolboy]}.
 
 -spec start(PoolArgs :: proplists:proplist())
-    -> gen:start_ret().
+    -> start_ret().
 start(PoolArgs) ->
     start(PoolArgs, PoolArgs).
 
 -spec start(PoolArgs :: proplists:proplist(),
             WorkerArgs:: proplists:proplist())
-    -> gen:start_ret().
+    -> start_ret().
 start(PoolArgs, WorkerArgs) ->
     start_pool(start, PoolArgs, WorkerArgs).
 
 -spec start_link(PoolArgs :: proplists:proplist())
-    -> gen:start_ret().
+    -> start_ret().
 start_link(PoolArgs)  ->
     %% for backwards compatability, pass the pool args as the worker args as well
     start_link(PoolArgs, PoolArgs).
 
 -spec start_link(PoolArgs :: proplists:proplist(),
                  WorkerArgs:: proplists:proplist())
-    -> gen:start_ret().
+    -> start_ret().
 start_link(PoolArgs, WorkerArgs)  ->
     start_pool(start_link, PoolArgs, WorkerArgs).
 
