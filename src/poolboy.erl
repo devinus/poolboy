@@ -234,6 +234,8 @@ handle_info({'EXIT', Pid, _Reason}, State) ->
 handle_info(_Info, State) ->
     {noreply, State}.
 
+terminate(shutdown, #state{workers=Workers}) ->
+    ok = lists:foreach(fun (W) -> unlink(W) end, Workers);
 terminate(_Reason, _State) ->
     ok.
 
