@@ -2,6 +2,9 @@
 
 [![Build Status](https://secure.travis-ci.org/devinus/poolboy.png?branch=master)](http://travis-ci.org/devinus/poolboy)
 
+Poolboy is a **lightweight**, **generic** pooling library for Erlang with a
+focus on **simplicity**, **performance**, and **rock-solid** disaster recovery.
+
 ## Usage
 
 ```erl-sh
@@ -165,4 +168,3 @@ meant especially for jurisdictions that do not recognize public domain works.
 
 
 [![Bitdeli Badge](https://d2weczhvl823v0.cloudfront.net/devinus/poolboy/trend.png)](https://bitdeli.com/free "Bitdeli Badge")
-
