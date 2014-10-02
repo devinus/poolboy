@@ -18,7 +18,7 @@
 -endif.
 
 -type pool() ::
-    Name :: atom() |
+    Name :: (atom() | pid()) |
     {Name :: atom(), node()} |
     {local, Name :: atom()} |
     {global, GlobalName :: any()} |
