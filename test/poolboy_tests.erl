@@ -50,6 +50,9 @@ pool_test_() ->
             },
             {<<"Pool returns status">>,
                 fun pool_returns_status/0
+            },
+            {<<"Server demonitors previously wating processes">>,
+                fun demonitors_previously_waiting_processes/0
             }
         ]
     }.
@@ -391,6 +394,28 @@ pool_returns_status() ->
     {ok, Pool4} = new_pool(0, 0),
     ?assertEqual({full, 0, 0, 0}, poolboy:status(Pool4)),
     ok = pool_call(Pool4, stop).
+
+demonitors_previously_waiting_processes() ->
+    {ok, Pool} = new_pool(1,0),
+    SelfPid = self(),
+    spawn(fun() ->
+                  P = poolboy:checkout(Pool),
+                  SelfPid ! ok,
+                  timer:sleep(2000),
+                  poolboy:checkin(Pool, P),
+                  timer:sleep(400)
+          end),
+    % wait for checkout in the process above
+    receive ok -> ok end,
+    Pid = poolboy:checkout(Pool),
+    ?assertEqual(1, length(get_monitors(Pool, self()))),
+    poolboy:checkin(Pool, Pid),
+    timer:sleep(400),
+    ?assertEqual(0, length(get_monitors(Pool, self()))).
+
+get_monitors(Pid, MonitoredProcess) ->
+    [{monitors, Monitors}]  = erlang:process_info(Pid, [monitors]),
+    lists:filter(fun({process, P}) -> P == MonitoredProcess  end, Monitors).
 
 new_pool(Size, MaxOverflow) ->
     poolboy:start_link([{name, {local, poolboy_test}},
