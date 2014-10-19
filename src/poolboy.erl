@@ -279,8 +279,7 @@ handle_checkin(Pid, State) ->
            monitors = Monitors,
            overflow = Overflow} = State,
     case queue:out(Waiting) of
-        {{value, {{FromPid, _} = From, _}}, Left} ->
-            Ref = erlang:monitor(process, FromPid),
+        {{value, {From, Ref}}, Left} ->
             true = ets:insert(Monitors, {Pid, Ref}),
             gen_server:reply(From, Pid),
             State#state{waiting = Left};
