@@ -150,7 +150,9 @@ handle_cast({checkin, Pid}, State = #state{monitors = Monitors}) ->
     end;
 
 handle_cast({cancel_waiting, Pid}, State) ->
-    Waiting = queue:filter(fun ({{P, _}, _}) -> P =/= Pid end, State#state.waiting),
+    Waiting = queue:filter(fun ({{P, _}, Ref}) ->
+        P =/= Pid orelse not(erlang:demonitor(Ref))
+    end, State#state.waiting),
     {noreply, State#state{waiting = Waiting}};
 
 handle_cast(_Msg, State) ->
