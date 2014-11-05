@@ -34,7 +34,8 @@
     monitors :: ets:tid(),
     size = 5 :: non_neg_integer(),
     overflow = 0 :: non_neg_integer(),
-    max_overflow = 10 :: non_neg_integer()
+    max_overflow = 10 :: non_neg_integer(),
+    strategy = lifo :: lifo | fifo
 }).
 
 -spec checkout(Pool :: pool()) -> pid().
@@ -132,6 +133,10 @@ init([{size, Size} | Rest], WorkerArgs, State) when is_integer(Size) ->
     init(Rest, WorkerArgs, State#state{size = Size});
 init([{max_overflow, MaxOverflow} | Rest], WorkerArgs, State) when is_integer(MaxOverflow) ->
     init(Rest, WorkerArgs, State#state{max_overflow = MaxOverflow});
+init([{strategy, lifo} | Rest], WorkerArgs, State) ->
+    init(Rest, WorkerArgs, State#state{strategy = lifo});
+init([{strategy, fifo} | Rest], WorkerArgs, State) ->
+    init(Rest, WorkerArgs, State#state{strategy = fifo});
 init([_ | Rest], WorkerArgs, State) ->
     init(Rest, WorkerArgs, State);
 init([], _WorkerArgs, #state{size = Size, supervisor = Sup} = State) ->
@@ -279,7 +284,8 @@ handle_checkin(Pid, State) ->
     #state{supervisor = Sup,
            waiting = Waiting,
            monitors = Monitors,
-           overflow = Overflow} = State,
+           overflow = Overflow,
+           strategy = Strategy} = State,
     case queue:out(Waiting) of
         {{value, {From, Ref}}, Left} ->
             true = ets:insert(Monitors, {Pid, Ref}),
@@ -289,7 +295,10 @@ handle_checkin(Pid, State) ->
             ok = dismiss_worker(Sup, Pid),
             State#state{waiting = Empty, overflow = Overflow - 1};
         {empty, Empty} ->
-            Workers = [Pid | State#state.workers],
+            Workers = case Strategy of
+                lifo -> [Pid | State#state.workers];
+                fifo -> State#state.workers ++ [Pid]
+            end,
             State#state{workers = Workers, waiting = Empty, overflow = 0}
     end.
 

@@ -56,6 +56,15 @@ pool_test_() ->
             },
             {<<"Pool demonitors when a checkout is cancelled">>,
                 fun demonitors_when_checkout_cancelled/0
+            },
+            {<<"Check that LIFO is the default strategy">>,
+                fun default_strategy_lifo/0
+            },
+            {<<"Check LIFO strategy">>,
+                fun lifo_strategy/0
+            },
+            {<<"Check FIFO strategy">>,
+                fun fifo_strategy/0
             }
         ]
     }.
@@ -432,6 +441,30 @@ demonitors_when_checkout_cancelled() ->
     Pid ! ok,
     ok = pool_call(Pool, stop).
 
+default_strategy_lifo() ->
+    %% Default strategy is LIFO
+    {ok, Pid} = new_pool(2, 0),
+    Worker1 = poolboy:checkout(Pid),
+    ok = poolboy:checkin(Pid, Worker1),
+    Worker1 = poolboy:checkout(Pid),
+    poolboy:stop(Pid).
+
+lifo_strategy() ->
+    {ok, Pid} = new_pool(2, 0, lifo),
+    Worker1 = poolboy:checkout(Pid),
+    ok = poolboy:checkin(Pid, Worker1),
+    Worker1 = poolboy:checkout(Pid),
+    poolboy:stop(Pid).
+
+fifo_strategy() ->
+    {ok, Pid} = new_pool(2, 0, fifo),
+    Worker1 = poolboy:checkout(Pid),
+    ok = poolboy:checkin(Pid, Worker1),
+    Worker2 = poolboy:checkout(Pid),
+    ?assert(Worker1 =/= Worker2),
+    Worker1 = poolboy:checkout(Pid),
+    poolboy:stop(Pid).
+
 get_monitors(Pid) ->
     [{monitors, Monitors}] = erlang:process_info(Pid, [monitors]),
     Monitors.
@@ -440,6 +473,12 @@ new_pool(Size, MaxOverflow) ->
     poolboy:start_link([{name, {local, poolboy_test}},
                         {worker_module, poolboy_test_worker},
                         {size, Size}, {max_overflow, MaxOverflow}]).
+
+new_pool(Size, MaxOverflow, Strategy) ->
+    poolboy:start_link([{name, {local, poolboy_test}},
+                        {worker_module, poolboy_test_worker},
+                        {size, Size}, {max_overflow, MaxOverflow},
+                        {strategy, Strategy}]).
 
 pool_call(ServerRef, Request) ->
     gen_server:call(ServerRef, Request).
