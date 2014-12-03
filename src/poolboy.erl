@@ -307,10 +307,9 @@ handle_worker_exit(Pid, State) ->
            monitors = Monitors,
            overflow = Overflow} = State,
     case queue:out(State#state.waiting) of
-        {{value, {{FromPid, _} = From, _}}, LeftWaiting} ->
-            MonitorRef = erlang:monitor(process, FromPid),
+        {{value, {From, Ref}}, LeftWaiting} ->
             NewWorker = new_worker(State#state.supervisor),
-            true = ets:insert(Monitors, {NewWorker, MonitorRef}),
+            true = ets:insert(Monitors, {NewWorker, Ref}),
             gen_server:reply(From, NewWorker),
             State#state{waiting = LeftWaiting};
         {empty, Empty} when Overflow > 0 ->

@@ -65,6 +65,9 @@ pool_test_() ->
             },
             {<<"Check FIFO strategy">>,
                 fun fifo_strategy/0
+            },
+            {<<"Pool reuses waiting monitor when a worker exits">>,
+                fun reuses_waiting_monitor_on_worker_exit/0
             }
         ]
     }.
@@ -464,6 +467,25 @@ fifo_strategy() ->
     ?assert(Worker1 =/= Worker2),
     Worker1 = poolboy:checkout(Pid),
     poolboy:stop(Pid).
+
+reuses_waiting_monitor_on_worker_exit() ->
+    {ok, Pool} = new_pool(1,0),
+
+    Self = self(),
+    Pid = spawn(fun() ->
+        Worker = poolboy:checkout(Pool),
+        Self ! {worker, Worker},
+        poolboy:checkout(Pool),
+        receive ok -> ok end
+    end),
+
+    Worker = receive {worker, Worker} -> Worker end,
+    exit(Worker, kill),
+
+    ?assertEqual(1, length(get_monitors(Pool))),
+
+    Pid ! ok,
+    ok = pool_call(Pool, stop).
 
 get_monitors(Pid) ->
     [{monitors, Monitors}] = erlang:process_info(Pid, [monitors]),
