@@ -2,7 +2,7 @@
 
 [![Build Status](https://api.travis-ci.org/devinus/poolboy.svg?branch=master)](https://travis-ci.org/devinus/poolboy)
 
-[![Support via Gratipay](https://raw.githubusercontent.com/twolfson/gittip-badge/0.2.1/dist/gittip.png)](https://gratipay.com/devinus/)
+[![Support via Gratipay](https://cdn.rawgit.com/gratipay/gratipay-badge/2.3.0/dist/gratipay.png)](https://gratipay.com/devinus/)
 
 Poolboy is a **lightweight**, **generic** pooling library for Erlang with a
 focus on **simplicity**, **performance**, and **rock-solid** disaster recovery.
