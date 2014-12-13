@@ -167,7 +167,7 @@ code_change(_OldVsn, State, _Extra) ->
 ## License
 
 Poolboy is available in the public domain (see `UNLICENSE`).
-Poolboy is also optionally available under the Apache License (see `LICENSE`),
+Poolboy is also optionally available under the ISC license (see `LICENSE`),
 meant especially for jurisdictions that do not recognize public domain works.
 
 
