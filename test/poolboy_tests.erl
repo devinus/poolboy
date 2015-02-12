@@ -69,6 +69,8 @@ pool_test_() ->
             {<<"Pool reuses waiting monitor when a worker exits">>,
                 fun reuses_waiting_monitor_on_worker_exit/0
             },
+            {<<"Recover from timeout without exit handling">>,
+                fun transaction_timeout_without_exit/0},
             {<<"Recover from transaction timeout">>,
                 fun transaction_timeout/0}
         ]
@@ -89,6 +91,22 @@ checkin_worker(Pid, Worker) ->
     %% worker. The only solution seems to be a nasty hardcoded sleep.
     poolboy:checkin(Pid, Worker),
     timer:sleep(500).
+
+
+transaction_timeout_without_exit() ->
+    {ok, Pid} = new_pool(1, 0),
+    ?assertEqual({ready,1,0,0}, pool_call(Pid, status)),
+    WorkerList = pool_call(Pid, get_all_workers),
+    ?assertMatch([_], WorkerList),
+    spawn(poolboy, transaction, [Pid,
+        fun(Worker) ->
+            ok = pool_call(Worker, work)
+        end,
+        0]),
+    timer:sleep(100),
+    ?assertEqual(WorkerList, pool_call(Pid, get_all_workers)),
+    ?assertEqual({ready,1,0,0}, pool_call(Pid, status)).
+
 
 transaction_timeout() ->
     {ok, Pid} = new_pool(1, 0),
