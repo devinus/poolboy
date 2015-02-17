@@ -136,7 +136,7 @@ pool_keep_alive() ->
     % base workers
     {W1, W2} = {poolboy:checkout(Pid), poolboy:checkout(Pid)},
     % new workers
-    {W3, W4} = {poolboy:checkout(Pid), poolboy:checkout(Pid)},
+    {_W3, _W4} = {poolboy:checkout(Pid), poolboy:checkout(Pid)},
 
     ?assertMatch({_, 0, 2, 4}, pool_call(Pid, status)),
 
@@ -148,7 +148,7 @@ pool_keep_alive() ->
 
     timer:sleep(1000),
     % get back
-    W11 = poolboy:checkout(Pid),
+    _W11 = poolboy:checkout(Pid),
 
     timer:sleep(2000),
     ?assertEqual(3, length(pool_call(Pid, get_all_workers))),

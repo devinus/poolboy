@@ -307,12 +307,10 @@ prepopulate(N, Sup, Workers) ->
     prepopulate(N-1, Sup, [new_worker(Sup) | Workers]).
 
 handle_checkin(Pid, State) ->
-    #state{supervisor = Sup,
-           waiting = Waiting,
+    #state{waiting = Waiting,
            monitors = Monitors,
            overflow = Overflow,
-           keep_alive_time = KeepAliveTime,
-           strategy = Strategy} = State,
+           keep_alive_time = KeepAliveTime} = State,
     case queue:out(Waiting) of
         {{value, {From, Ref}}, Left} ->
             true = ets:insert(Monitors, {Pid, Ref}),
