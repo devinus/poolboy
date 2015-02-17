@@ -21,6 +21,9 @@ pool_test_() ->
             {<<"Pool overflow should work">>,
                 fun pool_overflow/0
             },
+            {<<"Pool keep alive should work">>,
+                fun pool_keep_alive/0
+            },
             {<<"Pool behaves when empty">>,
                 fun pool_empty/0
             },
@@ -124,6 +127,33 @@ pool_overflow() ->
     ?assertEqual(5, length(pool_call(Pid, get_avail_workers))),
     ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
     ?assertEqual(0, length(pool_call(Pid, get_all_monitors))),
+    ok = pool_call(Pid, stop).
+
+pool_keep_alive() ->
+    %% Check that the time keep alive properly.
+    {ok, Pid} = new_pool(2, 2, {keep_alive_time, 2000}),
+
+    % base workers
+    {W1, W2} = {poolboy:checkout(Pid), poolboy:checkout(Pid)},
+    % new workers
+    {W3, W4} = {poolboy:checkout(Pid), poolboy:checkout(Pid)},
+
+    ?assertMatch({_, 0, 2, 4}, pool_call(Pid, status)),
+
+    checkin_worker(Pid, W1),
+    checkin_worker(Pid, W2),
+
+    ?assertEqual(4, length(pool_call(Pid, get_all_workers))),
+    ?assertMatch({_, 2, 2, 2}, pool_call(Pid, status)),
+
+    timer:sleep(1000),
+    % get back
+    W11 = poolboy:checkout(Pid),
+
+    timer:sleep(2000),
+    ?assertEqual(3, length(pool_call(Pid, get_all_workers))),
+    ?assertMatch({_, 1, 1, 3}, pool_call(Pid, status)),
+
     ok = pool_call(Pid, stop).
 
 pool_empty() ->
@@ -496,6 +526,11 @@ new_pool(Size, MaxOverflow) ->
                         {worker_module, poolboy_test_worker},
                         {size, Size}, {max_overflow, MaxOverflow}]).
 
+new_pool(Size, MaxOverflow, {keep_alive_time, KeepAliveTime}) ->
+    poolboy:start_link([{name, {local, poolboy_test}},
+                        {worker_module, poolboy_test_worker},
+                        {size, Size}, {max_overflow, MaxOverflow},
+                        {keep_alive_time, KeepAliveTime}]);
 new_pool(Size, MaxOverflow, Strategy) ->
     poolboy:start_link([{name, {local, poolboy_test}},
                         {worker_module, poolboy_test_worker},

@@ -35,6 +35,7 @@
     size = 5 :: non_neg_integer(),
     overflow = 0 :: non_neg_integer(),
     max_overflow = 10 :: non_neg_integer(),
+    keep_alive_time = 0 :: non_neg_integer(),
     strategy = lifo :: lifo | fifo
 }).
 
@@ -137,6 +138,8 @@ init([{strategy, lifo} | Rest], WorkerArgs, State) ->
     init(Rest, WorkerArgs, State#state{strategy = lifo});
 init([{strategy, fifo} | Rest], WorkerArgs, State) ->
     init(Rest, WorkerArgs, State#state{strategy = fifo});
+init([{keep_alive_time, KeepAliveTime} | Rest], WorkerArgs, State) ->
+    init(Rest, WorkerArgs, State#state{keep_alive_time = KeepAliveTime});
 init([_ | Rest], WorkerArgs, State) ->
     init(Rest, WorkerArgs, State);
 init([], _WorkerArgs, #state{size = Size, supervisor = Sup} = State) ->
@@ -208,6 +211,14 @@ handle_call(_Msg, _From, State) ->
     Reply = {error, invalid_message},
     {reply, Reply, State}.
 
+
+handle_info({interrupt, Pid}, State) ->
+    case ets:match(State#state.monitors, {Pid, '$1'}) of
+        [[_Ref]] ->
+            {noreply, State};
+        [] ->
+            {noreply, dismiss_worker(State, Pid)}
+    end;
 handle_info({'DOWN', Ref, _, _, _}, State) ->
     case ets:match(State#state.monitors, {'$1', Ref}) of
         [[Pid]] ->
@@ -266,9 +277,24 @@ new_worker(Sup, FromPid) ->
     Ref = erlang:monitor(process, FromPid),
     {Pid, Ref}.
 
-dismiss_worker(Sup, Pid) ->
+dismiss_worker(State, Pid) ->
+    dismiss_worker(State, Pid, 0).
+
+dismiss_worker(
+        #state{supervisor = Sup, overflow = Overflow} = State, Pid, 0) ->
     true = unlink(Pid),
-    supervisor:terminate_child(Sup, Pid).
+    supervisor:terminate_child(Sup, Pid),
+    State#state{overflow = Overflow - 1};
+dismiss_worker(State, Pid, KeepAliveTime) ->
+    erlang:send_after(KeepAliveTime, self(), {interrupt, Pid}),
+    accept_worker(State, Pid).
+
+accept_worker(#state{strategy = Strategy} = State, Pid) ->
+    Workers = case Strategy of
+        lifo -> [Pid | State#state.workers];
+        fifo -> State#state.workers ++ [Pid]
+    end,
+    State#state{workers = Workers}.
 
 prepopulate(N, _Sup) when N < 1 ->
     [];
@@ -285,6 +311,7 @@ handle_checkin(Pid, State) ->
            waiting = Waiting,
            monitors = Monitors,
            overflow = Overflow,
+           keep_alive_time = KeepAliveTime,
            strategy = Strategy} = State,
     case queue:out(Waiting) of
         {{value, {From, Ref}}, Left} ->
@@ -292,14 +319,11 @@ handle_checkin(Pid, State) ->
             gen_server:reply(From, Pid),
             State#state{waiting = Left};
         {empty, Empty} when Overflow > 0 ->
-            ok = dismiss_worker(Sup, Pid),
-            State#state{waiting = Empty, overflow = Overflow - 1};
+            NewState = dismiss_worker(State, Pid, KeepAliveTime),
+            NewState#state{waiting = Empty};
         {empty, Empty} ->
-            Workers = case Strategy of
-                lifo -> [Pid | State#state.workers];
-                fifo -> State#state.workers ++ [Pid]
-            end,
-            State#state{workers = Workers, waiting = Empty, overflow = 0}
+            NewState = accept_worker(State, Pid),
+            NewState#state{waiting = Empty, overflow = 0}
     end.
 
 handle_worker_exit(Pid, State) ->
