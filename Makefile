@@ -1,4 +1,5 @@
-REBAR = rebar
+REBAR = $(shell command -v rebar || echo ./rebar)
+
 DIALYZER = dialyzer
 
 DIALYZER_WARNINGS = -Wunmatched_returns -Werror_handling \
