@@ -49,11 +49,12 @@ checkout(Pool, Block) ->
 -spec checkout(Pool :: pool(), Block :: boolean(), Timeout :: timeout())
     -> pid() | full.
 checkout(Pool, Block, Timeout) ->
+    CRef = make_ref(),
     try
-        gen_server:call(Pool, {checkout, Block}, Timeout)
+        gen_server:call(Pool, {checkout, CRef, Block}, Timeout)
     catch
         Class:Reason ->
-            gen_server:cast(Pool, {cancel_waiting, self()}),
+            gen_server:cast(Pool, {cancel_waiting, CRef}),
             erlang:raise(Class, Reason, erlang:get_stacktrace())
     end.
 
@@ -145,8 +146,8 @@ init([], _WorkerArgs, #state{size = Size, supervisor = Sup} = State) ->
 
 handle_cast({checkin, Pid}, State = #state{monitors = Monitors}) ->
     case ets:lookup(Monitors, Pid) of
-        [{Pid, Ref}] ->
-            true = erlang:demonitor(Ref),
+        [{Pid, _, MRef}] ->
+            true = erlang:demonitor(MRef),
             true = ets:delete(Monitors, Pid),
             NewState = handle_checkin(Pid, State),
             {noreply, NewState};
@@ -154,16 +155,28 @@ handle_cast({checkin, Pid}, State = #state{monitors = Monitors}) ->
             {noreply, State}
     end;
 
-handle_cast({cancel_waiting, Pid}, State) ->
-    Waiting = queue:filter(fun ({{P, _}, Ref}) ->
-        P =/= Pid orelse not(erlang:demonitor(Ref))
-    end, State#state.waiting),
-    {noreply, State#state{waiting = Waiting}};
+handle_cast({cancel_waiting, CRef}, State) ->
+    case ets:match(State#state.monitors, {'$1', CRef, '$2'}) of
+        [[Pid, MRef]] ->
+            demonitor(MRef, [flush]),
+            true = ets:delete(State#state.monitors, Pid),
+            NewState = handle_checkin(Pid, State),
+            {noreply, NewState};
+        [] ->
+            Cancel = fun({_, Ref, MRef}) when Ref =:= CRef ->
+                             demonitor(MRef, [flush]),
+                             false;
+                        (_) ->
+                             true
+                     end,
+            Waiting = queue:filter(Cancel, State#state.waiting),
+            {noreply, State#state{waiting = Waiting}}
+    end;
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_call({checkout, Block}, {FromPid, _} = From, State) ->
+handle_call({checkout, CRef, Block}, {FromPid, _} = From, State) ->
     #state{supervisor = Sup,
            workers = Workers,
            monitors = Monitors,
@@ -171,18 +184,18 @@ handle_call({checkout, Block}, {FromPid, _} = From, State) ->
            max_overflow = MaxOverflow} = State,
     case Workers of
         [Pid | Left] ->
-            Ref = erlang:monitor(process, FromPid),
-            true = ets:insert(Monitors, {Pid, Ref}),
+            MRef = erlang:monitor(process, FromPid),
+            true = ets:insert(Monitors, {Pid, CRef, MRef}),
             {reply, Pid, State#state{workers = Left}};
         [] when MaxOverflow > 0, Overflow < MaxOverflow ->
-            {Pid, Ref} = new_worker(Sup, FromPid),
-            true = ets:insert(Monitors, {Pid, Ref}),
+            {Pid, MRef} = new_worker(Sup, FromPid),
+            true = ets:insert(Monitors, {Pid, CRef, MRef}),
             {reply, Pid, State#state{overflow = Overflow + 1}};
         [] when Block =:= false ->
             {reply, full, State};
         [] ->
-            Ref = erlang:monitor(process, FromPid),
-            Waiting = queue:in({From, Ref}, State#state.waiting),
+            MRef = erlang:monitor(process, FromPid),
+            Waiting = queue:in({From, CRef, MRef}, State#state.waiting),
             {noreply, State#state{waiting = Waiting}}
     end;
 
@@ -200,7 +213,8 @@ handle_call(get_all_workers, _From, State) ->
     WorkerList = supervisor:which_children(Sup),
     {reply, WorkerList, State};
 handle_call(get_all_monitors, _From, State) ->
-    Monitors = ets:tab2list(State#state.monitors),
+    Monitors = ets:select(State#state.monitors,
+                          [{{'$1', '_', '$2'}, [], [{{'$1', '$2'}}]}]),
     {reply, Monitors, State};
 handle_call(stop, _From, State) ->
     {stop, normal, ok, State};
@@ -208,22 +222,22 @@ handle_call(_Msg, _From, State) ->
     Reply = {error, invalid_message},
     {reply, Reply, State}.
 
-handle_info({'DOWN', Ref, _, _, _}, State) ->
-    case ets:match(State#state.monitors, {'$1', Ref}) of
+handle_info({'DOWN', MRef, _, _, _}, State) ->
+    case ets:match(State#state.monitors, {'$1', '_', MRef}) of
         [[Pid]] ->
             true = ets:delete(State#state.monitors, Pid),
             NewState = handle_checkin(Pid, State),
             {noreply, NewState};
         [] ->
-            Waiting = queue:filter(fun ({_, R}) -> R =/= Ref end, State#state.waiting),
+            Waiting = queue:filter(fun ({_, _, R}) -> R =/= MRef end, State#state.waiting),
             {noreply, State#state{waiting = Waiting}}
     end;
 handle_info({'EXIT', Pid, _Reason}, State) ->
     #state{supervisor = Sup,
            monitors = Monitors} = State,
     case ets:lookup(Monitors, Pid) of
-        [{Pid, Ref}] ->
-            true = erlang:demonitor(Ref),
+        [{Pid, _, MRef}] ->
+            true = erlang:demonitor(MRef),
             true = ets:delete(Monitors, Pid),
             NewState = handle_worker_exit(Pid, State),
             {noreply, NewState};
@@ -287,8 +301,8 @@ handle_checkin(Pid, State) ->
            overflow = Overflow,
            strategy = Strategy} = State,
     case queue:out(Waiting) of
-        {{value, {From, Ref}}, Left} ->
-            true = ets:insert(Monitors, {Pid, Ref}),
+        {{value, {From, CRef, MRef}}, Left} ->
+            true = ets:insert(Monitors, {Pid, CRef, MRef}),
             gen_server:reply(From, Pid),
             State#state{waiting = Left};
         {empty, Empty} when Overflow > 0 ->
@@ -307,9 +321,9 @@ handle_worker_exit(Pid, State) ->
            monitors = Monitors,
            overflow = Overflow} = State,
     case queue:out(State#state.waiting) of
-        {{value, {From, Ref}}, LeftWaiting} ->
+        {{value, {From, CRef, MRef}}, LeftWaiting} ->
             NewWorker = new_worker(State#state.supervisor),
-            true = ets:insert(Monitors, {NewWorker, Ref}),
+            true = ets:insert(Monitors, {NewWorker, CRef, MRef}),
             gen_server:reply(From, NewWorker),
             State#state{waiting = LeftWaiting};
         {empty, Empty} when Overflow > 0 ->

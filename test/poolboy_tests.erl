@@ -467,15 +467,16 @@ demonitors_previously_waiting_processes() ->
 
 demonitors_when_checkout_cancelled() ->
     {ok, Pool} = new_pool(1,0),
+    Self = self(),
     Pid = spawn(fun() ->
         poolboy:checkout(Pool),
-        poolboy:checkout(Pool),
+        _ = (catch poolboy:checkout(Pool, true, 1000)),
+        Self ! ok,
         receive ok -> ok end
     end),
     timer:sleep(500),
     ?assertEqual(2, length(get_monitors(Pool))),
-    gen_server:cast(Pool, {cancel_waiting, Pid}),
-    timer:sleep(500),
+    receive ok -> ok end,
     ?assertEqual(1, length(get_monitors(Pool))),
     Pid ! ok,
     ok = pool_call(Pool, stop).
@@ -516,7 +517,12 @@ reuses_waiting_monitor_on_worker_exit() ->
     end),
 
     Worker = receive {worker, Worker} -> Worker end,
+    Ref = monitor(process, Worker),
     exit(Worker, kill),
+    receive
+        {'DOWN', Ref, _, _, _} ->
+            ok
+    end,
 
     ?assertEqual(1, length(get_monitors(Pool))),
 
@@ -524,6 +530,8 @@ reuses_waiting_monitor_on_worker_exit() ->
     ok = pool_call(Pool, stop).
 
 get_monitors(Pid) ->
+    %% Synchronise with the Pid to ensure it has handled all expected work.
+    _ = sys:get_status(Pid),
     [{monitors, Monitors}] = erlang:process_info(Pid, [monitors]),
     Monitors.
 
