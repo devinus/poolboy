@@ -17,6 +17,8 @@ handle_call(die, _From, State) ->
 handle_call(_Event, _From, State) ->
     {reply, ok, State}.
 
+handle_cast(die, State) ->
+    {stop, {error, died}, State};
 handle_cast(_Event, State) ->
     {noreply, State}.
 
