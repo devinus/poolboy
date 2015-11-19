@@ -8,7 +8,8 @@ Poolboy is a **lightweight**, **generic** pooling library for Erlang with a
 focus on **simplicity**, **performance**, and **rock-solid** disaster recovery.
 
 ## Usage
-
+The most basic use case is to check out a worker, make a call and manually 
+return it to the pool when done
 ```erl-sh
 1> Worker = poolboy:checkout(PoolName).
 <0.9001.0>
@@ -17,7 +18,15 @@ ok
 3> poolboy:checkin(PoolName, Worker).
 ok
 ```
-
+Alternatively you can use a transaction which will return the worker to the 
+pool when the call is finished.
+```erl-sh
+poolboy:transaction(
+    PoolName,
+    fun(Worker) -> gen_server:call(Worker, Request) end, 
+    TransactionTimeout
+)
+```
 ## Example
 
 This is an example application showcasing database connection pools using
@@ -149,14 +158,29 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 ```
 
-## Options
+## Pool Options
 
-- `name`: the pool name
-- `worker_module`: the module that represents the workers
-- `size`: maximum pool size
-- `max_overflow`: maximum number of workers created if pool is empty
+- `name`: the pool name - optional
+- `worker_module`: the module that represents the workers - mandatory
+- `size`: maximum pool size - optional
+- `max_overflow`: maximum number of workers created if pool is empty - optional
 - `strategy`: `lifo` or `fifo`, determines whether checked in workers should be
   placed first or last in the line of available workers. Default is `lifo`.
+- `overflow_ttl`: time in milliseconds you want to wait before removing overflow
+  workers. Useful when it's expensive to start workers. Default is 0.
+  
+## Pool Status
+Returns : {Status, Workers, Overflow, InUse}
+- `Status`: ready | full | overflow
+            The ready atom indicates there are workers that are not checked out 
+            ready. The full atom indicates all workers including overflow are 
+            checked out. The overflow atom is used to describe the condition 
+            when all permanent workers are in use but there is overflow capacity 
+            available.
+- `Workers`: Number of workers ready for use.
+- `Overflow`: Number of overflow workers started, should never exceed number 
+              specified by MaxOverflow when starting pool
+- `InUse`: Number of workers currently busy/checked out
 
 ## Authors
 
