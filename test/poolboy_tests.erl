@@ -547,7 +547,7 @@ reuses_waiting_monitor_on_worker_exit() ->
         receive ok -> ok end
     end),
 
-    Worker = receive {worker, Worker} -> Worker end,
+    Worker = receive {worker, W} -> W end,
     Ref = monitor(process, Worker),
     exit(Worker, kill),
     receive

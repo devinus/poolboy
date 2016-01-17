@@ -143,8 +143,8 @@ init([{strategy, lifo} | Rest], WorkerArgs, State) ->
     init(Rest, WorkerArgs, State#state{strategy = lifo});
 init([{strategy, fifo} | Rest], WorkerArgs, State) ->
     init(Rest, WorkerArgs, State#state{strategy = fifo});
-init([{overflow_ttl, Milliseconds} | Rest], WorkerArgs, State) when is_integer(Milliseconds) ->
-    init(Rest, WorkerArgs, State#state{overflow_ttl = Milliseconds});
+init([{overflow_ttl, OverflowTtl} | Rest], WorkerArgs, State) when is_integer(OverflowTtl) ->
+    init(Rest, WorkerArgs, State#state{overflow_ttl = OverflowTtl});
 init([_ | Rest], WorkerArgs, State) ->
     init(Rest, WorkerArgs, State);
 init([], _WorkerArgs, #state{size = Size, supervisor = Sup} = State) ->
@@ -196,7 +196,7 @@ handle_call({checkout, CRef, Block}, {FromPid, _} = From, State) ->
             true = ets:insert(Monitors, {Pid, CRef, MRef}),
             ok = case ets:lookup(WorkersToReap, Pid) of
                 [{Pid, Tref}] ->
-                    {ok, cancel} = timer:cancel(Tref),
+                    erlang:cancel_timer(Tref),
                     true = ets:delete(State#state.workers_to_reap, Pid),
                     ok;
                 [] ->
@@ -329,7 +329,7 @@ purge_worker(Pid, State) ->
         true ->
             W = lists:filter(fun (P) -> P =/= Pid end, Workers),
             ok = dismiss_worker(Sup, Pid),
-            State#state{workers = W, overflow = State#state.overflow -1};
+            State#state{workers = W, overflow = Overflow - 1};
         false ->
             State
     end.
@@ -360,14 +360,12 @@ handle_checkin(Pid, State) ->
         {empty, Empty} when Overflow > 0, OverflowTtl > 0 ->
             case ets:lookup(WorkersToReap, Pid) of
                 [] ->
-                    {ok, Tref} =
-                        timer:send_after(OverflowTtl, self(), {reap_worker, Pid}),
+                    Tref = erlang:send_after(OverflowTtl, self(), {reap_worker, Pid}),
                     NewOverflow = Overflow;
                 [{Pid, Tref}] ->
-                    {ok, cancel} = timer:cancel(Tref),
-                    NewOverflow = Overflow -1,
-                    {ok, Tref} =
-                        timer:send_after(OverflowTtl, self(), {reap_worker, Pid})
+                    erlang:cancel_timer(Tref),
+                    NewOverflow = Overflow - 1,
+                    Tref = erlang:send_after(OverflowTtl, self(), {reap_worker, Pid})
             end,
             true = ets:insert(WorkersToReap, {Pid, Tref}),
             Workers = case Strategy of
