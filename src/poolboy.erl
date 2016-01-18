@@ -1,5 +1,4 @@
 %% Poolboy - A hunky Erlang worker pool factory
--include_lib("eunit/include/eunit.hrl").
 -module(poolboy).
 -behaviour(gen_server).
 
@@ -248,10 +247,8 @@ handle_info({'DOWN', MRef, _, _, _}, State) ->
 handle_info({'EXIT', Pid, _Reason}, State) ->
     #state{supervisor = Sup,
            monitors = Monitors,
-           workers_to_reap = WorkersToReap,
            workers = Workers} = State,
-
-    true = ets:delete(WorkersToReap, Pid),
+    ok = cancel_worker_reap(State, Pid),
     case ets:lookup(Monitors, Pid) of
         [{Pid, _, MRef}] ->
             true = erlang:demonitor(MRef),
