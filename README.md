@@ -19,8 +19,7 @@ ok
 ok
 ```
 Alternatively you can use a transaction which will return the worker to the 
-pool when the call is finished, the caller is gone, the call has exited or 
-the timeout set has been reached
+pool when the call is finished.
 ```erl-sh
 poolboy:transaction(
     PoolName,
