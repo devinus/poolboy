@@ -152,8 +152,11 @@ code_change(_OldVsn, State, _Extra) ->
 ## Options
 
 - `name`: the pool name
-- `worker_module`: the module that represents the workers
-- `size`: maximum pool size
+- `worker_module`: the module that represents the workers, if the workers are created
+  with dynamic arguments (each one of them) then you must pass a list and each element
+  of the list is a new worker. example: `{worker_module, {worker, [[1], [2]]}}`.
+- `size`: maximum pool size, if you use dynamical workers then the size is detected from 
+  list arguments length
 - `max_overflow`: maximum number of workers created if pool is empty
 - `strategy`: `lifo` or `fifo`, determines whether checked in workers should be
   placed first or last in the line of available workers. Default is `lifo`.
