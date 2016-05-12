@@ -126,10 +126,22 @@ init({PoolArgs, WorkerArgs}) ->
     process_flag(trap_exit, true),
     Waiting = queue:new(),
     Monitors = ets:new(monitors, [private]),
-    init(PoolArgs, WorkerArgs, #state{waiting = Waiting, monitors = Monitors}).
+    % check if workers has different args
+    Size = case proplists:get_value(worker_module, PoolArgs) of
+        {_Mod, WorkerDynArgs} when is_list(WorkerDynArgs) ->
+            [{size, length(WorkerDynArgs)}];
+        _Mod                                              ->
+            []   
+    end,
+    init(PoolArgs ++ Size, WorkerArgs, #state{waiting = Waiting, monitors = Monitors}).
 
-init([{worker_module, Mod} | Rest], WorkerArgs, State) when is_atom(Mod) ->
-    {ok, Sup} = poolboy_sup:start_link(Mod, WorkerArgs),
+init([{worker_module, {Mod, []}} | Rest], WorkerArgs, State) when is_atom(Mod) ->
+    init(Rest, WorkerArgs, State);
+init([{worker_module, {Mod, WorkerDynArgs}} | Rest], _WorkerArgs, State) when is_atom(Mod) ->
+    {ok, Sup} = poolboy_sup:start_link(Mod, {dynamic, WorkerDynArgs}),
+    init(Rest, _WorkerArgs, State#state{supervisor = {Sup, {Mod, WorkerDynArgs}}});
+init([{worker_module, Mod} | Rest], WorkerArgs, State) when is_atom(Mod) ->    
+    {ok, Sup} = poolboy_sup:start_link(Mod, WorkerArgs),    
     init(Rest, WorkerArgs, State#state{supervisor = Sup});
 init([{size, Size} | Rest], WorkerArgs, State) when is_integer(Size) ->
     init(Rest, WorkerArgs, State#state{size = Size});
@@ -257,7 +269,12 @@ handle_info(_Info, State) ->
 
 terminate(_Reason, State) ->
     ok = lists:foreach(fun (W) -> unlink(W) end, State#state.workers),
-    true = exit(State#state.supervisor, shutdown),
+    true = case State#state.supervisor of
+        {Sup, {_Mod, _WorkerDynArgs}} ->
+            exit(Sup, shutdown);
+        Sup                           ->
+            exit(Sup, shutdown)
+    end,
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -271,6 +288,11 @@ start_pool(StartFun, PoolArgs, WorkerArgs) ->
             gen_server:StartFun(Name, ?MODULE, {PoolArgs, WorkerArgs}, [])
     end.
 
+new_worker({N, Sup, Mod, Args}) ->
+    {ok, Pid} = supervisor:start_child(Sup, {N, {Mod, start_link, [Args]},
+        temporary,5000,worker,[Mod]}),
+    true = link(Pid),
+    Pid;
 new_worker(Sup) ->
     {ok, Pid} = supervisor:start_child(Sup, []),
     true = link(Pid),
@@ -292,6 +314,8 @@ prepopulate(N, Sup) ->
 
 prepopulate(0, _Sup, Workers) ->
     Workers;
+prepopulate(N, {Sup, {Mod, [ Args | Rest ]}}, Workers) ->
+    prepopulate(N-1, {Sup, {Mod, Rest}}, [new_worker({N, Sup, Mod, Args}) | Workers]);
 prepopulate(N, Sup, Workers) ->
     prepopulate(N-1, Sup, [new_worker(Sup) | Workers]).
 
