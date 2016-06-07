@@ -390,7 +390,7 @@ pool_full_nonblocking() ->
     ok = pool_call(Pid, stop).
 
 pool_overflow_ttl_workers() ->
-    {ok, Pid} = new_pool_with_overflow_ttl(1, 1, 1000),
+    {ok, Pid} = new_pool_with_overflow_ttl(1, 1, 800),
     Worker = poolboy:checkout(Pid),
     Worker1 = poolboy:checkout(Pid),
     % Test pool behaves normally when full
@@ -428,7 +428,7 @@ pool_overflow_ttl_workers() ->
     ?assertEqual({ready, 2, 1, 0}, poolboy:status(Pid)),
     ?assertEqual(2, length(pool_call(Pid, get_all_workers))),
     % Test overflow worker is reaped in the correct time period
-    timer:sleep(850),
+    timer:sleep(1500),
     % Test overflow worker is reaped in the correct time period
     ?assertEqual({ready, 1, 0, 0}, poolboy:status(Pid)),
     % Test worker death behaviour
