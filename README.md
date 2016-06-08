@@ -168,6 +168,8 @@ code_change(_OldVsn, State, _Extra) ->
   placed first or last in the line of available workers. Default is `lifo`.
 - `overflow_ttl`: time in milliseconds you want to wait before removing overflow
   workers. Useful when it's expensive to start workers. Default is 0.
+- `overflow_check_period`: time in milliseconds for checking overflow workers to rip. 
+  Default is min(1 sec, overflow_ttl). Cheking job will not be started, if overflow_ttl is 0.
   
 ## Pool Status
 Returns : {Status, Workers, Overflow, InUse}

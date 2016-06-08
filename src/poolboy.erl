@@ -10,7 +10,7 @@
 -export_type([pool/0]).
 
 -define(TIMEOUT, 5000).
--define(RIP_PERIOD, 1000).  %1 sec period. If overflow_ttl is less, than a second - rip_period will be same as overflow_ttl
+-define(CHECK_OVERFLOW_DEFAULT_PERIOD, 1000000).  %microseconds
 
 -ifdef(pre17).
 -type pid_queue() :: queue().
@@ -37,6 +37,7 @@
     overflow = 0 :: non_neg_integer(),
     max_overflow = 10 :: non_neg_integer(),
     strategy = lifo :: lifo | fifo,
+    overflow_check_period = ?CHECK_OVERFLOW_DEFAULT_PERIOD :: non_neg_integer(),    %milliseconds
     overflow_ttl = 0 :: non_neg_integer()   %microseconds
 }).
 
@@ -141,13 +142,14 @@ init([{strategy, lifo} | Rest], WorkerArgs, State) ->
 init([{strategy, fifo} | Rest], WorkerArgs, State) ->
     init(Rest, WorkerArgs, State#state{strategy = fifo});
 init([{overflow_ttl, OverflowTtl} | Rest], WorkerArgs, State) when is_integer(OverflowTtl) ->
-    TimerTTL = min(OverflowTtl, ?RIP_PERIOD),
-    erlang:send_after(TimerTTL, self(), {rip_workers, TimerTTL}),
     init(Rest, WorkerArgs, State#state{overflow_ttl = OverflowTtl * 1000});
+init([{overflow_check_period, OverflowCheckPeriod} | Rest], WorkerArgs, State) when is_integer(OverflowCheckPeriod) ->
+    init(Rest, WorkerArgs, State#state{overflow_check_period = OverflowCheckPeriod * 1000});
 init([_ | Rest], WorkerArgs, State) ->
     init(Rest, WorkerArgs, State);
 init([], _WorkerArgs, #state{size = Size, supervisor = Sup} = State) ->
     Workers = prepopulate(Size, Sup),
+    start_timer(State),
     {ok, State#state{workers = Workers}}.
 
 handle_cast({checkin, Pid}, State = #state{monitors = Monitors}) ->
@@ -386,3 +388,12 @@ do_reap_workers([Worker = {Pid, LTime} | Rest], Now, TTL, Overflow, Sup, Workers
         false ->
             do_reap_workers(Rest, Now, TTL, Overflow, Sup, [Worker | Workers])
     end.
+
+start_timer(#state{overflow_check_period = undefined, overflow_ttl = 0}) ->
+    ok;
+start_timer(#state{overflow_check_period = undefined, overflow_ttl = TTL}) ->
+    TimerTTL = min(TTL, ?CHECK_OVERFLOW_DEFAULT_PERIOD), %If overflow_ttl is less, than a second - period will be same as overflow_ttl
+    erlang:send_after(TimerTTL, self(), {rip_workers, TimerTTL});
+start_timer(#state{overflow_ttl = TTL}) ->
+    TimerTTL = min(TTL, ?CHECK_OVERFLOW_DEFAULT_PERIOD),
+    erlang:send_after(TimerTTL, self(), {rip_workers, TimerTTL}).
