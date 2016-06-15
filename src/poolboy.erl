@@ -10,7 +10,7 @@
 -export_type([pool/0]).
 
 -define(TIMEOUT, 5000).
--define(CHECK_OVERFLOW_DEFAULT_PERIOD, 1000000).  %microseconds
+-define(CHECK_OVERFLOW_DEFAULT_PERIOD, 1000000).  %microseconds (1 sec)
 
 -ifdef(pre17).
 -type pid_queue() :: queue().
@@ -37,7 +37,7 @@
     overflow = 0 :: non_neg_integer(),
     max_overflow = 10 :: non_neg_integer(),
     strategy = lifo :: lifo | fifo,
-    overflow_check_period = ?CHECK_OVERFLOW_DEFAULT_PERIOD :: non_neg_integer(),    %milliseconds
+    overflow_check_period :: non_neg_integer(),
     overflow_ttl = 0 :: non_neg_integer()   %microseconds
 }).
 
@@ -264,9 +264,10 @@ handle_info({rip_workers, TimerTTL}, State) ->
     #state{overflow = Overflow,
         overflow_ttl = OverTTL,
         workers = Workers,
+        strategy = Strategy,
         supervisor = Sup} = State,
     Now = os:timestamp(),
-    {UOverflow, UWorkers} = do_reap_workers(Workers, Now, OverTTL, Overflow, Sup, []),
+    {UOverflow, UWorkers} = do_reap_workers(Workers, Now, OverTTL, Overflow, Sup, [], Strategy),
     erlang:send_after(TimerTTL, self(), {rip_workers, TimerTTL}),
     {noreply, State#state{overflow = UOverflow, workers = UWorkers}};
 handle_info(_Info, State) ->
@@ -376,24 +377,25 @@ add_worker_execute(WorkerPid, CRef, FromPid, Monitors) ->
 return_worker(lifo, Pid, Workers) -> [Pid | Workers];
 return_worker(fifo, Pid, Workers) -> Workers ++ [Pid].
 
-do_reap_workers(UnScanned, _, _, 0, _, Workers) ->
+do_reap_workers(UnScanned, _, _, 0, _, Workers, _) ->
     {0, lists:reverse(Workers) ++ UnScanned};
-do_reap_workers([], _, _, Overflow, _, Workers) ->
+do_reap_workers([], _, _, Overflow, _, Workers, _) ->
     {Overflow, lists:reverse(Workers)};
-do_reap_workers([Worker = {Pid, LTime} | Rest], Now, TTL, Overflow, Sup, Workers) ->
+do_reap_workers([Worker = {Pid, LTime} | Rest], Now, TTL, Overflow, Sup, Workers, Strategy) ->
     case timer:now_diff(Now, LTime) > TTL of
         true ->
             ok = dismiss_worker(Sup, Pid),
-            do_reap_workers(Rest, Now, TTL, Overflow - 1, Sup, Workers);
+            do_reap_workers(Rest, Now, TTL, Overflow - 1, Sup, Workers, Strategy);
+        false when Strategy =:= lifo ->
+            {Overflow, lists:reverse([Worker | Workers]) ++ Rest};
         false ->
-            do_reap_workers(Rest, Now, TTL, Overflow, Sup, [Worker | Workers])
+            do_reap_workers(Rest, Now, TTL, Overflow, Sup, [Worker | Workers], Strategy)
     end.
 
-start_timer(#state{overflow_check_period = undefined, overflow_ttl = 0}) ->
+start_timer(#state{overflow_ttl = 0}) -> %overflow turned off
     ok;
-start_timer(#state{overflow_check_period = undefined, overflow_ttl = TTL}) ->
-    TimerTTL = min(TTL, ?CHECK_OVERFLOW_DEFAULT_PERIOD), %If overflow_ttl is less, than a second - period will be same as overflow_ttl
+start_timer(#state{overflow_check_period = TimerTTL}) when is_number(TimerTTL) ->
     erlang:send_after(TimerTTL, self(), {rip_workers, TimerTTL});
-start_timer(#state{overflow_ttl = TTL}) ->
-    TimerTTL = min(TTL, ?CHECK_OVERFLOW_DEFAULT_PERIOD),
+start_timer(#state{overflow_check_period = undefined, overflow_ttl = TTL}) ->
+    TimerTTL = round(min(TTL, ?CHECK_OVERFLOW_DEFAULT_PERIOD) / 1000), %If overflow_ttl is less, than a second - period will be same as overflow_ttl
     erlang:send_after(TimerTTL, self(), {rip_workers, TimerTTL}).

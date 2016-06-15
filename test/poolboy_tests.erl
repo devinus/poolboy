@@ -45,6 +45,12 @@ pool_test_() ->
             {<<"Pool with overflow_ttl behaves as expected">>,
                 fun pool_overflow_ttl_workers/0
             },
+            {<<"Lifo pool with overflow_ttl rips workers">>,
+                fun lifo_overflow_rip_test/0
+            },
+            {<<"Fifo pool with overflow_ttl rips workers">>,
+                fun fifo_overflow_rip_test/0
+            },
             {<<"Pool behaves on owner death">>,
                 fun owner_death/0
             },
@@ -442,6 +448,31 @@ pool_overflow_ttl_workers() ->
     ?assertEqual({ready, 1, 0, 0}, poolboy:status(Pid)),
     ok = pool_call(Pid, stop).
 
+lifo_overflow_rip_test() ->
+    {ok, Pid} = new_pool_with_overflow_ttl(1, 2, 300, lifo),
+    Worker = poolboy:checkout(Pid),
+    Worker1 = poolboy:checkout(Pid),
+    Worker2 = poolboy:checkout(Pid),
+    ?assertEqual({full, 0, 2, 3}, poolboy:status(Pid)),
+    poolboy:checkin(Pid, Worker),
+    poolboy:checkin(Pid, Worker1),
+    poolboy:checkin(Pid, Worker2),
+    timer:sleep(500),
+    ?assertEqual({ready, 1, 0, 0}, poolboy:status(Pid)),
+    ok = pool_call(Pid, stop).
+
+fifo_overflow_rip_test() ->
+    {ok, Pid} = new_pool_with_overflow_ttl(1, 2, 300, fifo),
+    Worker = poolboy:checkout(Pid),
+    Worker1 = poolboy:checkout(Pid),
+    Worker2 = poolboy:checkout(Pid),
+    ?assertEqual({full, 0, 2, 3}, poolboy:status(Pid)),
+    poolboy:checkin(Pid, Worker),
+    poolboy:checkin(Pid, Worker1),
+    poolboy:checkin(Pid, Worker2),
+    timer:sleep(500),
+    ?assertEqual({ready, 1, 0, 0}, poolboy:status(Pid)),
+    ok = pool_call(Pid, stop).
 
 owner_death() ->
     %% Check that a dead owner (a process that dies with a worker checked out)
@@ -604,10 +635,13 @@ new_pool(Size, MaxOverflow, Strategy) ->
                         {strategy, Strategy}]).
 
 new_pool_with_overflow_ttl(Size, MaxOverflow, OverflowTtl) ->
+    new_pool_with_overflow_ttl(Size, MaxOverflow, OverflowTtl, lifo).
+
+new_pool_with_overflow_ttl(Size, MaxOverflow, OverflowTtl, Strategy) ->
     poolboy:start_link([{name, {local, poolboy_test}},
         {worker_module, poolboy_test_worker},
         {size, Size}, {max_overflow, MaxOverflow},
-        {overflow_ttl, OverflowTtl}]).
+        {overflow_ttl, OverflowTtl}, {strategy, Strategy}]).
 
 pool_call(ServerRef, Request) ->
     gen_server:call(ServerRef, Request).
