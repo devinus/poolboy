@@ -255,7 +255,7 @@ handle_info({'EXIT', Pid, _Reason}, State) ->
             case lists:keymember(Pid, 1, Workers) of
                 true ->
                     W = lists:keydelete(Pid, 1, Workers),
-                    {noreply, State#state{workers = [{new_worker(Sup), os:timestamp()} | W]}};
+                    {noreply, State#state{workers = [{new_worker(Sup), erlang:monotonic_time(micro_seconds)} | W]}};
                 false ->
                     {noreply, State}
             end
@@ -266,7 +266,7 @@ handle_info({rip_workers, TimerTTL}, State) ->
         workers = Workers,
         strategy = Strategy,
         supervisor = Sup} = State,
-    Now = os:timestamp(),
+    Now = erlang:monotonic_time(micro_seconds),
     {UOverflow, UWorkers} = do_reap_workers(Workers, Now, OverTTL, Overflow, Sup, [], Strategy),
     erlang:send_after(TimerTTL, self(), {rip_workers, TimerTTL}),
     {noreply, State#state{overflow = UOverflow, workers = UWorkers}};
@@ -306,7 +306,7 @@ prepopulate(N, Sup) ->
 prepopulate(0, _Sup, Workers) ->
     Workers;
 prepopulate(N, Sup, Workers) ->
-    prepopulate(N-1, Sup, [{new_worker(Sup), os:timestamp()} | Workers]).
+    prepopulate(N-1, Sup, [{new_worker(Sup), erlang:monotonic_time(micro_seconds)} | Workers]).
 
 handle_checkin(Pid, State) ->
     #state{supervisor = Sup,
@@ -321,14 +321,14 @@ handle_checkin(Pid, State) ->
             gen_server:reply(From, Pid),
             State#state{waiting = Left};
         {empty, Empty} when Overflow > 0, OverflowTtl > 0 ->
-            LastUseTime = os:timestamp(),
+            LastUseTime = erlang:monotonic_time(micro_seconds),
             Workers = return_worker(Strategy, {Pid, LastUseTime}, State#state.workers),
             State#state{workers = Workers, waiting = Empty};
         {empty, Empty} when Overflow > 0 ->
             ok = dismiss_worker(Sup, Pid),
             State#state{waiting = Empty, overflow = Overflow - 1};
         {empty, Empty} ->
-            LastUseTime = os:timestamp(),
+            LastUseTime = erlang:monotonic_time(micro_seconds),
             Workers = return_worker(Strategy, {Pid, LastUseTime}, State#state.workers),
             State#state{workers = Workers, waiting = Empty, overflow = 0}
     end.
@@ -347,7 +347,7 @@ handle_worker_exit(Pid, State) ->
             State#state{overflow = Overflow - 1, waiting = Empty};
         {empty, Empty} ->
             Workers =
-                [{new_worker(Sup), os:timestamp()}
+                [{new_worker(Sup), erlang:monotonic_time(micro_seconds)}
                  | lists:filter(fun (P) -> P =/= Pid end, State#state.workers)],
             State#state{workers = Workers, waiting = Empty}
     end.
@@ -382,7 +382,7 @@ do_reap_workers(UnScanned, _, _, 0, _, Workers, _) ->
 do_reap_workers([], _, _, Overflow, _, Workers, _) ->
     {Overflow, lists:reverse(Workers)};
 do_reap_workers([Worker = {Pid, LTime} | Rest], Now, TTL, Overflow, Sup, Workers, Strategy) ->
-    case timer:now_diff(Now, LTime) > TTL of
+    case Now - LTime > TTL of
         true ->
             ok = dismiss_worker(Sup, Pid),
             do_reap_workers(Rest, Now, TTL, Overflow - 1, Sup, Workers, Strategy);
