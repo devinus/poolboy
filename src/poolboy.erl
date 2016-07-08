@@ -1,5 +1,4 @@
 %% Poolboy - A hunky Erlang worker pool factory
-
 -module(poolboy).
 -behaviour(gen_server).
 
@@ -11,6 +10,7 @@
 -export_type([pool/0]).
 
 -define(TIMEOUT, 5000).
+-define(CHECK_OVERFLOW_DEFAULT_PERIOD, 1000000).  %microseconds (1 sec)
 
 -ifdef(pre17).
 -type pid_queue() :: queue().
@@ -36,7 +36,9 @@
     size = 5 :: non_neg_integer(),
     overflow = 0 :: non_neg_integer(),
     max_overflow = 10 :: non_neg_integer(),
-    strategy = lifo :: lifo | fifo
+    strategy = lifo :: lifo | fifo,
+    overflow_check_period :: non_neg_integer(), %milliseconds
+    overflow_ttl = 0 :: non_neg_integer()   %microseconds
 }).
 
 -spec checkout(Pool :: pool()) -> pid().
@@ -139,17 +141,21 @@ init([{strategy, lifo} | Rest], WorkerArgs, State) ->
     init(Rest, WorkerArgs, State#state{strategy = lifo});
 init([{strategy, fifo} | Rest], WorkerArgs, State) ->
     init(Rest, WorkerArgs, State#state{strategy = fifo});
+init([{overflow_ttl, OverflowTtl} | Rest], WorkerArgs, State) when is_integer(OverflowTtl) ->
+    init(Rest, WorkerArgs, State#state{overflow_ttl = OverflowTtl * 1000});
+init([{overflow_check_period, OverflowCheckPeriod} | Rest], WorkerArgs, State) when is_integer(OverflowCheckPeriod) ->
+    init(Rest, WorkerArgs, State#state{overflow_check_period = OverflowCheckPeriod});
 init([_ | Rest], WorkerArgs, State) ->
     init(Rest, WorkerArgs, State);
 init([], _WorkerArgs, #state{size = Size, supervisor = Sup} = State) ->
     Workers = prepopulate(Size, Sup),
+    start_timer(State),
     {ok, State#state{workers = Workers}}.
 
 handle_cast({checkin, Pid}, State = #state{monitors = Monitors}) ->
-    case ets:lookup(Monitors, Pid) of
+    case ets:take(Monitors, Pid) of
         [{Pid, _, MRef}] ->
             true = erlang:demonitor(MRef),
-            true = ets:delete(Monitors, Pid),
             NewState = handle_checkin(Pid, State),
             {noreply, NewState};
         [] ->
@@ -184,13 +190,15 @@ handle_call({checkout, CRef, Block}, {FromPid, _} = From, State) ->
            overflow = Overflow,
            max_overflow = MaxOverflow} = State,
     case Workers of
-        [Pid | Left] ->
-            MRef = erlang:monitor(process, FromPid),
-            true = ets:insert(Monitors, {Pid, CRef, MRef}),
+        [{Pid, _} | Left] when State#state.overflow_ttl > 0 ->
+            add_worker_execute(Pid, CRef, FromPid, Monitors),
+            {reply, Pid, State#state{workers = Left}};
+        [{Pid, _} | Left] ->
+            add_worker_execute(Pid, CRef, FromPid, Monitors),
             {reply, Pid, State#state{workers = Left}};
         [] when MaxOverflow > 0, Overflow < MaxOverflow ->
-            {Pid, MRef} = new_worker(Sup, FromPid),
-            true = ets:insert(Monitors, {Pid, CRef, MRef}),
+            Pid = new_worker(Sup),
+            add_worker_execute(Pid, CRef, FromPid, Monitors),
             {reply, Pid, State#state{overflow = Overflow + 1}};
         [] when Block =:= false ->
             {reply, full, State};
@@ -204,11 +212,12 @@ handle_call(status, _From, State) ->
     #state{workers = Workers,
            monitors = Monitors,
            overflow = Overflow} = State,
+    CheckedOutWorkers = ets:info(Monitors, size),
     StateName = state_name(State),
-    {reply, {StateName, length(Workers), Overflow, ets:info(Monitors, size)}, State};
-handle_call(get_avail_workers, _From, State) ->
-    Workers = State#state.workers,
-    {reply, Workers, State};
+    {reply, {StateName, length(Workers), Overflow, CheckedOutWorkers}, State};
+handle_call(get_avail_workers, _From, State = #state{workers = Workers}) ->
+    Pids = lists:map(fun({Pid, _TS}) -> Pid end, Workers),
+    {reply, Pids, State};
 handle_call(get_all_workers, _From, State) ->
     Sup = State#state.supervisor,
     WorkerList = supervisor:which_children(Sup),
@@ -235,29 +244,38 @@ handle_info({'DOWN', MRef, _, _, _}, State) ->
     end;
 handle_info({'EXIT', Pid, _Reason}, State) ->
     #state{supervisor = Sup,
-           monitors = Monitors} = State,
-    case ets:lookup(Monitors, Pid) of
+           monitors = Monitors,
+           workers = Workers} = State,
+    case ets:take(Monitors, Pid) of
         [{Pid, _, MRef}] ->
             true = erlang:demonitor(MRef),
-            true = ets:delete(Monitors, Pid),
             NewState = handle_worker_exit(Pid, State),
             {noreply, NewState};
         [] ->
-            case lists:member(Pid, State#state.workers) of
+            case lists:keymember(Pid, 1, Workers) of
                 true ->
-                    W = lists:filter(fun (P) -> P =/= Pid end, State#state.workers),
-                    {noreply, State#state{workers = [new_worker(Sup) | W]}};
+                    W = lists:keydelete(Pid, 1, Workers),
+                    {noreply, State#state{workers = [{new_worker(Sup), erlang:monotonic_time(micro_seconds)} | W]}};
                 false ->
                     {noreply, State}
             end
     end;
-
+handle_info({rip_workers, TimerTTL}, State) ->
+    #state{overflow = Overflow,
+        overflow_ttl = OverTTL,
+        workers = Workers,
+        strategy = Strategy,
+        supervisor = Sup} = State,
+    Now = erlang:monotonic_time(micro_seconds),
+    {UOverflow, UWorkers} = do_reap_workers(Workers, Now, OverTTL, Overflow, Sup, [], Strategy),
+    erlang:send_after(TimerTTL, self(), {rip_workers, TimerTTL}),
+    {noreply, State#state{overflow = UOverflow, workers = UWorkers}};
 handle_info(_Info, State) ->
     {noreply, State}.
 
-terminate(_Reason, State) ->
-    ok = lists:foreach(fun (W) -> unlink(W) end, State#state.workers),
-    true = exit(State#state.supervisor, shutdown),
+terminate(_Reason, #state{workers = Workers, supervisor = Sup}) ->
+    ok = lists:foreach(fun ({W, _}) -> unlink(W) end, Workers),
+    true = exit(Sup, shutdown),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -276,11 +294,6 @@ new_worker(Sup) ->
     true = link(Pid),
     Pid.
 
-new_worker(Sup, FromPid) ->
-    Pid = new_worker(Sup),
-    Ref = erlang:monitor(process, FromPid),
-    {Pid, Ref}.
-
 dismiss_worker(Sup, Pid) ->
     true = unlink(Pid),
     supervisor:terminate_child(Sup, Pid).
@@ -293,27 +306,30 @@ prepopulate(N, Sup) ->
 prepopulate(0, _Sup, Workers) ->
     Workers;
 prepopulate(N, Sup, Workers) ->
-    prepopulate(N-1, Sup, [new_worker(Sup) | Workers]).
+    prepopulate(N-1, Sup, [{new_worker(Sup), erlang:monotonic_time(micro_seconds)} | Workers]).
 
 handle_checkin(Pid, State) ->
     #state{supervisor = Sup,
            waiting = Waiting,
            monitors = Monitors,
            overflow = Overflow,
-           strategy = Strategy} = State,
+           strategy = Strategy,
+           overflow_ttl = OverflowTtl} = State,
     case queue:out(Waiting) of
         {{value, {From, CRef, MRef}}, Left} ->
             true = ets:insert(Monitors, {Pid, CRef, MRef}),
             gen_server:reply(From, Pid),
             State#state{waiting = Left};
+        {empty, Empty} when Overflow > 0, OverflowTtl > 0 ->
+            LastUseTime = erlang:monotonic_time(micro_seconds),
+            Workers = return_worker(Strategy, {Pid, LastUseTime}, State#state.workers),
+            State#state{workers = Workers, waiting = Empty};
         {empty, Empty} when Overflow > 0 ->
             ok = dismiss_worker(Sup, Pid),
             State#state{waiting = Empty, overflow = Overflow - 1};
         {empty, Empty} ->
-            Workers = case Strategy of
-                lifo -> [Pid | State#state.workers];
-                fifo -> State#state.workers ++ [Pid]
-            end,
+            LastUseTime = erlang:monotonic_time(micro_seconds),
+            Workers = return_worker(Strategy, {Pid, LastUseTime}, State#state.workers),
             State#state{workers = Workers, waiting = Empty, overflow = 0}
     end.
 
@@ -331,7 +347,7 @@ handle_worker_exit(Pid, State) ->
             State#state{overflow = Overflow - 1, waiting = Empty};
         {empty, Empty} ->
             Workers =
-                [new_worker(Sup)
+                [{new_worker(Sup), erlang:monotonic_time(micro_seconds)}
                  | lists:filter(fun (P) -> P =/= Pid end, State#state.workers)],
             State#state{workers = Workers, waiting = Empty}
     end.
@@ -343,7 +359,43 @@ state_name(State = #state{overflow = Overflow}) when Overflow < 1 ->
         true -> overflow;
         false -> ready
     end;
-state_name(#state{overflow = MaxOverflow, max_overflow = MaxOverflow}) ->
-    full;
+state_name(State = #state{overflow = Overflow}) when Overflow > 0 ->
+    #state{max_overflow = MaxOverflow, workers = Workers, overflow = Overflow} = State,
+    NumberOfWorkers = length(Workers),
+    case MaxOverflow == Overflow of
+        true when NumberOfWorkers > 0 -> ready;
+        true -> full;
+        false -> overflow
+    end;
 state_name(_State) ->
     overflow.
+
+add_worker_execute(WorkerPid, CRef, FromPid, Monitors) ->
+    MRef = erlang:monitor(process, FromPid),
+    true = ets:insert(Monitors, {WorkerPid, CRef, MRef}).
+
+return_worker(lifo, Pid, Workers) -> [Pid | Workers];
+return_worker(fifo, Pid, Workers) -> Workers ++ [Pid].
+
+do_reap_workers(UnScanned, _, _, 0, _, Workers, _) ->
+    {0, lists:reverse(Workers) ++ UnScanned};
+do_reap_workers([], _, _, Overflow, _, Workers, _) ->
+    {Overflow, lists:reverse(Workers)};
+do_reap_workers([Worker = {Pid, LTime} | Rest], Now, TTL, Overflow, Sup, Workers, Strategy) ->
+    case Now - LTime > TTL of
+        true ->
+            ok = dismiss_worker(Sup, Pid),
+            do_reap_workers(Rest, Now, TTL, Overflow - 1, Sup, Workers, Strategy);
+        false when Strategy =:= lifo ->
+            {Overflow, lists:reverse([Worker | Workers]) ++ Rest};
+        false ->
+            do_reap_workers(Rest, Now, TTL, Overflow, Sup, [Worker | Workers], Strategy)
+    end.
+
+start_timer(#state{overflow_ttl = 0}) -> %overflow turned off
+    ok;
+start_timer(#state{overflow_check_period = TimerTTL}) when is_number(TimerTTL) ->
+    erlang:send_after(TimerTTL, self(), {rip_workers, TimerTTL});
+start_timer(#state{overflow_check_period = undefined, overflow_ttl = TTL}) ->
+    TimerTTL = round(min(TTL, ?CHECK_OVERFLOW_DEFAULT_PERIOD) / 1000), %If overflow_ttl is less, than a second - period will be same as overflow_ttl
+    erlang:send_after(TimerTTL, self(), {rip_workers, TimerTTL}).
