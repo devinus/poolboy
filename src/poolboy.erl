@@ -37,7 +37,7 @@
     overflow = 0 :: non_neg_integer(),
     max_overflow = 10 :: non_neg_integer(),
     strategy = lifo :: lifo | fifo,
-    overflow_check_period :: non_neg_integer(),
+    overflow_check_period :: non_neg_integer(), %milliseconds
     overflow_ttl = 0 :: non_neg_integer()   %microseconds
 }).
 
@@ -144,7 +144,7 @@ init([{strategy, fifo} | Rest], WorkerArgs, State) ->
 init([{overflow_ttl, OverflowTtl} | Rest], WorkerArgs, State) when is_integer(OverflowTtl) ->
     init(Rest, WorkerArgs, State#state{overflow_ttl = OverflowTtl * 1000});
 init([{overflow_check_period, OverflowCheckPeriod} | Rest], WorkerArgs, State) when is_integer(OverflowCheckPeriod) ->
-    init(Rest, WorkerArgs, State#state{overflow_check_period = OverflowCheckPeriod * 1000});
+    init(Rest, WorkerArgs, State#state{overflow_check_period = OverflowCheckPeriod});
 init([_ | Rest], WorkerArgs, State) ->
     init(Rest, WorkerArgs, State);
 init([], _WorkerArgs, #state{size = Size, supervisor = Sup} = State) ->
