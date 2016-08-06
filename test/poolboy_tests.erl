@@ -42,6 +42,9 @@ pool_test_() ->
             {<<"Non-blocking pool behaves when full">>,
                 fun pool_full_nonblocking/0
             },
+            {<<"Pool with overflow_ttl behaves as expected">>,
+                fun pool_overflow_ttl_workers/0
+            },
             {<<"Pool behaves on owner death">>,
                 fun owner_death/0
             },
@@ -386,6 +389,60 @@ pool_full_nonblocking() ->
     ?assertEqual(10, length(pool_call(Pid, get_all_monitors))),
     ok = pool_call(Pid, stop).
 
+pool_overflow_ttl_workers() ->
+    {ok, Pid} = new_pool_with_overflow_ttl(1, 1, 1000),
+    Worker = poolboy:checkout(Pid),
+    Worker1 = poolboy:checkout(Pid),
+    % Test pool behaves normally when full
+    ?assertEqual({full, 0, 1, 2}, poolboy:status(Pid)),
+    ?assertEqual(full, poolboy:checkout(Pid, false)),
+    % Test first worker is returned to list of available workers
+    poolboy:checkin(Pid, Worker),
+    timer:sleep(500),
+    ?assertEqual({ready, 1, 1, 1}, poolboy:status(Pid)),
+    % Ensure first worker is in fact being reused
+    Worker2 = poolboy:checkout(Pid),
+    ?assertEqual({full, 0, 1, 2}, poolboy:status(Pid)),
+    ?assertEqual(Worker, Worker2),
+    % Test second worker is returned to list of available workers
+    poolboy:checkin(Pid, Worker1),
+    timer:sleep(500),
+    ?assertEqual({ready, 1, 1, 1}, poolboy:status(Pid)),
+    % Ensure second worker is in fact being reused
+    Worker3 =  poolboy:checkout(Pid),
+    ?assertEqual({full, 0, 1, 2}, poolboy:status(Pid)),
+    ?assertEqual(Worker1, Worker3),
+    % Test we've got two workers ready when two are checked in in quick
+    % succession
+    poolboy:checkin(Pid, Worker2),
+    timer:sleep(100),
+    ?assertEqual({ready, 1, 1, 1}, poolboy:status(Pid)),
+    poolboy:checkin(Pid, Worker3),
+    timer:sleep(100),
+    ?assertEqual({ready, 2, 1, 0}, poolboy:status(Pid)),
+    % Test an owner death
+    spawn(fun() ->
+        poolboy:checkout(Pid),
+        receive after 100 -> exit(normal) end
+    end),
+    ?assertEqual({ready, 2, 1, 0}, poolboy:status(Pid)),
+    ?assertEqual(2, length(pool_call(Pid, get_all_workers))),
+    % Test overflow worker is reaped in the correct time period
+    timer:sleep(850),
+    % Test overflow worker is reaped in the correct time period
+    ?assertEqual({ready, 1, 0, 0}, poolboy:status(Pid)),
+    % Test worker death behaviour
+    Worker4 = poolboy:checkout(Pid),
+    Worker5 = poolboy:checkout(Pid),
+    exit(Worker5, kill),
+    timer:sleep(100),
+    ?assertEqual({overflow, 0, 0, 1}, poolboy:status(Pid)),
+    exit(Worker4, kill),
+    timer:sleep(100),
+    ?assertEqual({ready, 1, 0, 0}, poolboy:status(Pid)),
+    ok = pool_call(Pid, stop).
+
+
 owner_death() ->
     %% Check that a dead owner (a process that dies with a worker checked out)
     %% causes the pool to dismiss the worker and prune the state space.
@@ -516,7 +573,7 @@ reuses_waiting_monitor_on_worker_exit() ->
         receive ok -> ok end
     end),
 
-    Worker = receive {worker, Worker} -> Worker end,
+    Worker = receive {worker, W} -> W end,
     Ref = monitor(process, Worker),
     exit(Worker, kill),
     receive
@@ -545,6 +602,12 @@ new_pool(Size, MaxOverflow, Strategy) ->
                         {worker_module, poolboy_test_worker},
                         {size, Size}, {max_overflow, MaxOverflow},
                         {strategy, Strategy}]).
+
+new_pool_with_overflow_ttl(Size, MaxOverflow, OverflowTtl) ->
+    poolboy:start_link([{name, {local, poolboy_test}},
+        {worker_module, poolboy_test_worker},
+        {size, Size}, {max_overflow, MaxOverflow},
+        {overflow_ttl, OverflowTtl}]).
 
 pool_call(ServerRef, Request) ->
     gen_server:call(ServerRef, Request).
