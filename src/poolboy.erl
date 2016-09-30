@@ -235,7 +235,8 @@ handle_info({'DOWN', MRef, _, _, _}, State) ->
     end;
 handle_info({'EXIT', Pid, _Reason}, State) ->
     #state{supervisor = Sup,
-           monitors = Monitors} = State,
+           monitors = Monitors,
+           strategy = Strategy} = State,
     case ets:lookup(Monitors, Pid) of
         [{Pid, _, MRef}] ->
             true = erlang:demonitor(MRef),
@@ -246,7 +247,7 @@ handle_info({'EXIT', Pid, _Reason}, State) ->
             case lists:member(Pid, State#state.workers) of
                 true ->
                     W = lists:filter(fun (P) -> P =/= Pid end, State#state.workers),
-                    {noreply, State#state{workers = [new_worker(Sup) | W]}};
+                    {noreply, State#state{workers = new_worker(Sup, Strategy, W)}};
                 false ->
                     {noreply, State}
             end
@@ -280,6 +281,11 @@ new_worker(Sup, FromPid) ->
     Pid = new_worker(Sup),
     Ref = erlang:monitor(process, FromPid),
     {Pid, Ref}.
+
+new_worker(Sup, lifo, Workers) ->
+    [new_worker(Sup) | Workers];
+new_worker(Sup, fifo, Workers) ->
+    Workers ++ [new_worker(Sup)].
 
 dismiss_worker(Sup, Pid) ->
     true = unlink(Pid),
@@ -320,7 +326,8 @@ handle_checkin(Pid, State) ->
 handle_worker_exit(Pid, State) ->
     #state{supervisor = Sup,
            monitors = Monitors,
-           overflow = Overflow} = State,
+           overflow = Overflow,
+           strategy = Strategy} = State,
     case queue:out(State#state.waiting) of
         {{value, {From, CRef, MRef}}, LeftWaiting} ->
             NewWorker = new_worker(State#state.supervisor),
@@ -330,10 +337,8 @@ handle_worker_exit(Pid, State) ->
         {empty, Empty} when Overflow > 0 ->
             State#state{overflow = Overflow - 1, waiting = Empty};
         {empty, Empty} ->
-            Workers =
-                [new_worker(Sup)
-                 | lists:filter(fun (P) -> P =/= Pid end, State#state.workers)],
-            State#state{workers = Workers, waiting = Empty}
+            Workers = lists:filter(fun (P) -> P =/= Pid end, State#state.workers),
+            State#state{workers = new_worker(Sup, Strategy, Workers), waiting = Empty}
     end.
 
 state_name(State = #state{overflow = Overflow}) when Overflow < 1 ->
