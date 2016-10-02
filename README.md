@@ -156,7 +156,7 @@ code_change(_OldVsn, State, _Extra) ->
 - `size`: maximum pool size
 - `max_overflow`: maximum number of workers created if pool is empty
 - `strategy`: `lifo` or `fifo`, determines whether checked in workers should be
-  placed first or last in the line of available workers. Default is `lifo`.
+  placed first or last in the line of available workers. So, `lifo` operates like a traditional stack; `fifo` like a queue. Default is `lifo`.
 
 ## Authors
 
