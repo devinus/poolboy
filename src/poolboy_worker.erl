@@ -5,6 +5,6 @@
 -callback start_link(WorkerArgs) -> {ok, Pid} |
                                     {error, {already_started, Pid}} |
                                     {error, Reason} when
-    WorkerArgs :: proplists:proplist(),
+    WorkerArgs :: any(),
     Pid        :: pid(),
     Reason     :: term().
