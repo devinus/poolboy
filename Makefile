@@ -1,34 +1,23 @@
-REBAR = $(shell command -v rebar || echo ./rebar)
+.PHONY: deps test
 
-DIALYZER = dialyzer
+DIALYZER_FLAGS =
 
-DIALYZER_WARNINGS = -Wunmatched_returns -Werror_handling \
-                    -Wrace_conditions -Wunderspecs
+all: deps compile
 
-.PHONY: all compile test qc clean get-deps build-plt dialyze
+compile: deps
+	./rebar compile
 
-all: compile
-
-compile:
-	@$(REBAR) compile
-
-test: compile
-	@$(REBAR) eunit skip_deps=true
-
-qc: compile
-	@$(REBAR) qc skip_deps=true
+deps:
+	./rebar get-deps
 
 clean:
-	@$(REBAR) clean
+	./rebar clean
+	rm -rf test.*-temp-data
 
-get-deps:
-	@$(REBAR) get-deps
+distclean: clean
+	./rebar delete-deps
 
-.dialyzer_plt:
-	@$(DIALYZER) --build_plt --output_plt .dialyzer_plt \
-	    --apps kernel stdlib
+DIALYZER_APPS = kernel stdlib sasl erts ssl tools os_mon runtime_tools crypto inets \
+	xmerl public_key mnesia eunit syntax_tools compiler
 
-build-plt: .dialyzer_plt
-
-dialyze: build-plt
-	@$(DIALYZER) --src src --plt .dialyzer_plt $(DIALYZER_WARNINGS)
+include tools.mk
