@@ -138,6 +138,9 @@ init({PoolArgs, WorkerArgs}) ->
     Monitors = ets:new(monitors, [private]),
     init(PoolArgs, WorkerArgs, #state{waiting = Waiting, monitors = Monitors}).
 
+init([{cooldown, Cooldown} | Rest], WorkerArgs, State) when is_integer(Cooldown) ->
+    timer:sleep(Cooldown),
+    init(Rest, WorkerArgs, State);
 init([{worker_module, Mod} | Rest], WorkerArgs, State) when is_atom(Mod) ->
     {ok, Sup} = poolboy_sup:start_link(Mod, WorkerArgs),
     init(Rest, WorkerArgs, State#state{supervisor = Sup});
