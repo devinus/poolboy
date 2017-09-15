@@ -182,6 +182,24 @@ Returns : {Status, Workers, Overflow, InUse}
               specified by MaxOverflow when starting pool
 - `InUse`: Number of workers currently busy/checked out
 
+## Full Pool Status
+Returns a propslist of counters relating to a specified pool.  Useful
+for graphing the state of your pools
+- `size`: The defined size of the permanent worker pool
+- `max_overflow`: The maximum number of overflow workers allowed
+- `total_worker_count`: The total supervised workers. This includes
+    any workers waiting to be culled and not available to the
+    general pool
+- `ready_worker_count`: The count of workers available workers to be
+    used including overflow workers. Workers in this count may or may
+    not be checked out.
+- `checked_out_worker_count`: The count of workers that are currently
+    checked out
+- `overflow_worker_count`: The count of active overflow workers
+- `waiting_request_count`: The backlog of requests waiting to checkout
+    a worker
+
+
 ## Authors
 
 - Devin Torres (devinus) <devin@devintorres.com>
