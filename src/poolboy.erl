@@ -4,7 +4,7 @@
 
 -export([checkout/1, checkout/2, checkout/3, checkin/2, transaction/2,
          transaction/3, child_spec/2, child_spec/3, start/1, start/2,
-         start_link/1, start_link/2, stop/1, status/1]).
+         start_link/1, start_link/2, stop/1, status/1, full_status/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
          code_change/3]).
 -export_type([pool/0]).
@@ -123,6 +123,10 @@ stop(Pool) ->
 status(Pool) ->
     gen_server:call(Pool, status).
 
+-spec full_status(Pool :: pool()) -> proplists:proplist().
+full_status(Pool) ->
+    gen_server:call(Pool, full_status).
+
 init({PoolArgs, WorkerArgs}) ->
     process_flag(trap_exit, true),
     Waiting = queue:new(),
@@ -217,6 +221,29 @@ handle_call(status, _From, State) ->
     CheckedOutWorkers = ets:info(Monitors, size),
     StateName = state_name(State),
     {reply, {StateName, length(Workers), Overflow, CheckedOutWorkers}, State};
+handle_call(full_status, _From, State) ->
+    #state{workers = Workers,
+        size = Size,
+        monitors = Monitors,
+        overflow = Overflow,
+        max_overflow = MaxOverflow,
+        supervisor = Sup,
+        waiting = Waiting } = State,
+    CheckedOutWorkers = ets:info(Monitors, size),
+    {reply,
+        [
+            {size, Size}, % The permanent worker size
+            {max_overflow, MaxOverflow}, % The overflow size
+            % The maximum amount of worker is size + overflow_size
+
+            {total_worker_count, length(supervisor:which_children(Sup))}, % The total of all workers
+            {ready_worker_count, length(Workers)}, % Number of workers ready to use
+            {overflow_worker_count, Overflow}, % Number of overflow workers
+            {checked_out_worker_count, CheckedOutWorkers}, % Number of workers currently checked out
+            {waiting_request_count, queue:len(Waiting)} % Number of waiting requests
+        ],
+        State
+    };
 handle_call(get_avail_workers, _From, State) ->
     Workers = State#state.workers,
     {reply, Workers, State};
