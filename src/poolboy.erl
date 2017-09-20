@@ -231,7 +231,7 @@ handle_call(full_status, _From, State) ->
         waiting = Waiting } = State,
     CheckedOutWorkers = ets:info(Monitors, size),
     {reply,
-        {
+        [
             {size, Size}, % The permanent worker size
             {max_overflow, MaxOverflow}, % The overflow size
             % The maximum amount of worker is size + overflow_size
@@ -241,7 +241,7 @@ handle_call(full_status, _From, State) ->
             {overflow_worker_count, Overflow}, % Number of overflow workers
             {checked_out_worker_count, CheckedOutWorkers}, % Number of workers currently checked out
             {waiting_request_count, queue:len(Waiting)} % Number of waiting requests
-        },
+        ],
         State
     };
 handle_call(get_avail_workers, _From, State) ->

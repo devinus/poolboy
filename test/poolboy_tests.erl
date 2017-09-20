@@ -675,11 +675,11 @@ pool_call(ServerRef, Request) ->
 full_status(Size, MaxOverFlow, TotalWorker, ReadyWorker, OverflowWorker,
     CheckedOutWorker, Waiting) ->
     % Helper function to populate the results tuple
-    {{size, Size},
+    [{size, Size},
      {max_overflow, MaxOverFlow},
      {total_worker_count,TotalWorker},
      {ready_worker_count, ReadyWorker},
      {overflow_worker_count, OverflowWorker},
      {checked_out_worker_count, CheckedOutWorker},
      {waiting_request_count, Waiting}
-    }.
+    ].
