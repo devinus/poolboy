@@ -40,7 +40,9 @@ eqc_test_() ->
           pid,
           size,
           max_overflow,
-          checked_out = []
+          checked_out = [],
+          checked_in = [],
+          killed = []
         }).
 
 %% @doc Returns the state in which each test case starts. (Unless a different
@@ -110,7 +112,7 @@ stop_poolboy(Pid) ->
          Args :: [term()],
          NewS :: eqc_statem:symbolic_state() | eqc_state:dynamic_state().
 stop_poolboy_next(S, _Value, [_Pid]) ->
-    S#state{pid=undefined, checked_out=[]}.
+    S#state{pid=undefined, checked_out=[], checked_in=[], killed=[]}.
 
 %% --- Operation: checkout_nonblock ---
 %% @doc checkout_nonblock_pre/1 - Precondition for generation
@@ -141,7 +143,8 @@ checkout_nonblock_next(S, Value, [_Pid]) ->
         false ->
             S;
         _ ->
-            S#state{checked_out=S#state.checked_out++[Value]}
+            S#state{checked_out=S#state.checked_out++[Value],
+                    checked_in=S#state.checked_in--[Value]}
     end.
 
 %% @doc checkout_nonblock_post - Postcondition for checkout_nonblock
@@ -195,7 +198,8 @@ checkout_block_next(S, Value, [_Pid]) ->
         false ->
             S;
         _ ->
-            S#state{checked_out=S#state.checked_out++[Value]}
+            S#state{checked_out=S#state.checked_out++[Value],
+                    checked_in=S#state.checked_in--[Value]}
     end.
 
 %% @doc checkout_block_post - Postcondition for checkout_block
@@ -262,7 +266,8 @@ checkin(Pid, {Worker, _}) ->
          Args :: [term()],
          NewS :: eqc_statem:symbolic_state() | eqc_state:dynamic_state().
 checkin_next(S, _Value, [_Pid, Worker]) ->
-    S#state{checked_out=S#state.checked_out -- [Worker]}.
+    S#state{checked_out=S#state.checked_out -- [Worker],
+            checked_in=S#state.checked_in ++ [Worker]}.
 
 %% @doc checkin_post - Postcondition for checkin
 -spec checkin_post(S, Args, Res) -> true | term()
@@ -309,37 +314,42 @@ kill_worker({Worker, _}) ->
          Args :: [term()],
          NewS :: eqc_statem:symbolic_state() | eqc_state:dynamic_state().
 kill_worker_next(S, _Value, [Worker]) ->
-    S#state{checked_out=S#state.checked_out -- [Worker]}.
+    S#state{checked_out=S#state.checked_out -- [Worker],
+            checked_in=S#state.checked_in -- [Worker],
+            killed=S#state.killed ++ [Worker]}.
 
 %% --- Operation: kill_idle_worker ---
 %% @doc kill_idle_worker_pre/1 - Precondition for generation
 -spec kill_idle_worker_pre(S :: eqc_statem:symbolic_state()) -> boolean().
 kill_idle_worker_pre(S) ->
-    S#state.pid /= undefined andalso S#state.checked_out /= [].
+    S#state.checked_in /= [] andalso length(S#state.checked_out) < S#state.size.
 
 %% @doc kill_idle_worker_args - Argument generator
 -spec kill_idle_worker_args(S :: eqc_statem:symbolic_state()) -> eqc_gen:gen([term()]).
 kill_idle_worker_args(S) ->
-    [S#state.pid].
+    [elements(S#state.checked_in)].
 
 %% @doc kill_idle_worker_pre/2 - Precondition for kill_idle_worker
 -spec kill_idle_worker_pre(S, Args) -> boolean()
     when S    :: eqc_statem:symbolic_state(),
          Args :: [term()].
-kill_idle_worker_pre(S, [_Pool]) ->
-    length(S#state.checked_out) < S#state.size.
+kill_idle_worker_pre(S, [Worker]) ->
+    lists:member(Worker, S#state.checked_in) andalso not lists:member(Worker, S#state.checked_out)
+        andalso not lists:member(Worker, S#state.killed).
 
 %% @doc kill_idle_worker - The actual operation
-kill_idle_worker(Pool) ->
-    Pid = poolboy:checkout(Pool, false),
-    case Pid of
-        _ when is_pid(Pid) ->
-            poolboy:checkin(Pool, Pid),
-            kill_worker({Pid, self()});
-        _ ->
-            timer:sleep(1),
-            kill_idle_worker(Pool)
-    end.
+kill_idle_worker({Worker, _}) ->
+    exit(Worker, kill),
+    timer:sleep(1).
+
+%% @doc kill_idle_worker_next - Next state function
+-spec kill_idle_worker_next(S, Var, Args) -> NewS
+    when S    :: eqc_statem:symbolic_state() | eqc_state:dynamic_state(),
+         Var  :: eqc_statem:var() | term(),
+         Args :: [term()],
+         NewS :: eqc_statem:symbolic_state() | eqc_state:dynamic_state().
+kill_idle_worker_next(S, _Value, [Worker]) ->
+    S#state{checked_in=S#state.checked_in--[Worker]}.
 
 %% --- Operation: spurious_exit ---
 %% @doc spurious_exit_pre/1 - Precondition for generation
@@ -405,7 +415,7 @@ prop_sequential() ->
                        ?TRAPEXIT(
                           aggregate(command_names(Cmds),
                                     begin
-                                        HSR={_H , _S,Res} = run_commands(?MODULE,Cmds),
+                                        HSR={_H ,_S, Res} = run_commands(?MODULE,Cmds),
                                         catch(stop_poolboy(whereis(?MODULE))),
                                         pretty_commands(?MODULE, Cmds, HSR,
                                                         Res == ok)
