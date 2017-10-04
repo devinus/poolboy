@@ -515,8 +515,10 @@ worker_proxy_loop() ->
   end.
 
 worker_proxy_block(From, Ref, Pool) ->
-  From ! {Ref, (catch poolboy:checkout(Pool, true, 100))},
-  timer:sleep(10000).
+  Res = (catch poolboy:checkout(Pool, true, 100)),
+  From ! {Ref, Res},
+  %% If we checked out a worker - make sure to hang around until the end of the test...
+  [ timer:sleep(10000) || is_exit(Res) /= true ].
 
 -endif.
 -endif.
