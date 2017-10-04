@@ -41,7 +41,8 @@ eqc_test_() ->
           size,
           max_overflow,
           checked_out = [],
-          workers = []
+          workers = [],
+          check_invariant = true
         }).
 
 %% @doc Returns the state in which each test case starts. (Unless a different
@@ -49,6 +50,9 @@ eqc_test_() ->
 -spec initial_state() -> eqc_statem:symbolic_state().
 initial_state() ->
     #state{}.
+
+initial_state(CheckInv) ->
+    #state{ check_invariant = CheckInv }.
 
 %% -- Commons ----------------------------------------------------------------
 %% If pid is not set there is no poolboy, and the only Cmd possible is start
@@ -336,7 +340,7 @@ spurious_exit(Pool) ->
 %% @doc <i>Optional callback</i>, Invariant, checked for each visited state
 %%      during test execution.
 %% -spec invariant(S :: eqc_statem:dynamic_state()) -> boolean().
-invariant(S = #state{pid=Pool},_) when Pool /= undefined ->
+invariant(S = #state{ pid = Pool, check_invariant = true }) when Pool /= undefined ->
     State = if length(S#state.checked_out) == S#state.size + S#state.max_overflow ->
                     full;
                length(S#state.checked_out) >= S#state.size ->
@@ -356,7 +360,7 @@ invariant(S = #state{pid=Pool},_) when Pool /= undefined ->
         _ ->
             {wrong_state, RealStatus, {State, Workers, OverFlow, Monitors}}
     end;
-invariant(_, _) ->
+invariant(_) ->
     true.
 
 %% @doc weight/2 - Distribution of calls
@@ -388,17 +392,15 @@ prop_sequential() ->
 
 prop_parallel() ->
     fault_rate(1, 10,
-    ?FORALL(Cmds={Seq,Par},parallel_commands(?MODULE),
+    ?FORALL(Cmds,parallel_commands(?MODULE, initial_state(false)),
     ?TRAPEXIT(
     begin
       worker_proxy_start(),
-      NewPar = Par,
-      %% NewPar = [P ++ [{set, {var, 0}, {call, erlang, self, []}}] || P <- Par],
-      HSR={_H,_S, Res} = run_parallel_commands(?MODULE,{Seq,NewPar}),
+      HSR={_H,_S, Res} = run_parallel_commands(?MODULE, Cmds),
       catch(stop_poolboy(whereis(?MODULE))),
       worker_proxy_stop(),
       aggregate(command_names(Cmds),
-        pretty_commands(?MODULE, {Seq, NewPar}, HSR, Res == ok))
+        pretty_commands(?MODULE, Cmds, HSR, Res == ok))
     end))).
 
 
