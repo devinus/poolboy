@@ -69,32 +69,31 @@ This is a very simple Poolboy example showcasing the call flow. Print statements
 -export([init/1]).
 
 start() ->
-	io:fwrite("just about to example:start()~n"),
+	io:fwrite("#MESSAGE : ~p calls example:start()~n", [self()]),
     application:start(?MODULE).
 
 stop() ->
-	io:fwrite("just about to example:stop()~n"),
+	io:fwrite("#MESSAGE : ~p calls example:stop()~n", [self()]),
     application:stop(?MODULE).
 
 start(_Type, _Args) ->
-	io:fwrite("just about to supervisor:start_link()~n"),
+	io:fwrite("#MESSAGE : ~p calls supervisor:start_link()~n(default callback is example:init())~n", [self()]),
     supervisor:start_link({local, example_sup}, ?MODULE, []).
 
 stop(_State) ->
-	io:fwrite("BYE! just about to stop example~n"),
     ok.
 
 init([]) ->
-	io:fwrite("just about to example:init([])~n"),
+	io:fwrite("#MESSAGE : ~p called example:init()~n", [self()]),
     {ok, Pools} = application:get_env(example, pools),
-    io:fwrite("just about to define PoolSpecs~n"),
+    io:fwrite("#MESSAGE : ~p defining PoolSpecs~n", [self()]),
     PoolSpecs = lists:map(fun({Name, SizeArgs, WorkerArgs}) ->
-    	io:fwrite("just about to define PoolSpecs:PoolArgs~n"),
+    	io:fwrite("#MESSAGE : ~p defining PoolArgs~n", [self()]),
         PoolArgs = [{name, {local, Name}},
             		{worker_module, example_worker}] ++ SizeArgs,
         poolboy:child_spec(Name, PoolArgs, WorkerArgs)
     end, Pools),
-    io:fwrite("just about to finalize example:init~n"),
+    io:fwrite("#MESSAGE : ~p example:init() call is now complete~n", [self()]),
     {ok, {{one_for_one, 10, 10}, PoolSpecs}}.
 
 squery(PoolName, Sql) ->
@@ -126,28 +125,27 @@ xquery(PoolName, Stmt, Params) ->
 -export([start_link/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
          code_change/3]).
--export([play/0]).
+-export([warmup	/0]).
 
 -record(state, {conn}).
 
 start_link(Args) ->
-    io:fwrite("just about to start example_worker:start_link~n"),
     gen_server:start_link(?MODULE, Args, []).
 
 init(Args) ->
-    io:fwrite("just about to define example_worker:init~n"),
+    io:fwrite("#MESSAGE : ~p defines a new worker~n", [self()]),
     process_flag(trap_exit, true),
     Hostname = proplists:get_value(hostname, Args),
     Database = proplists:get_value(database, Args),
     Username = proplists:get_value(username, Args),
     Password = proplists:get_value(password, Args),
-    io:fwrite("just about to play~n"),
-    {ok} = play(),
-    io:fwrite("play complete~n"),
+    io:fwrite("#MESSAGE : ~p will be starting to warmup~n", [self()]),
+    {ok} = warmup(),
+    io:fwrite("#MESSAGE : ~p warmup is complete~n~n~n", [self()]),
     {ok, ok}.
 
-play() ->
-    io:fwrite("lets play~n"),
+warmup() ->
+    io:fwrite("#MESSAGE : ~p is now warming up~n", [self()]),
     {ok}.
 
 handle_call({squery, Sql}, _From, #state{conn=Conn}=State) ->
@@ -169,7 +167,7 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(_Reason, ok) ->
-    io:fwrite("just about to terminate example_worker~n"),
+    io:fwrite("#MESSAGE : ~p wants to terminate the worker~n", [self()]),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
