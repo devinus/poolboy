@@ -292,19 +292,10 @@ handle_info({'EXIT', Pid, _Reason}, State) ->
             end
     end;
 handle_info({reap_worker, Pid}, State)->
-    #state{monitors = Monitors,
-           workers_to_reap = WorkersToReap} = State,
+    #state{workers_to_reap = WorkersToReap} = State,
     true = ets:delete(WorkersToReap, Pid),
-    case ets:lookup(Monitors, Pid) of
-        [{Pid, _, MRef}] ->
-            true = erlang:demonitor(MRef),
-            true = ets:delete(Monitors, Pid),
-            NewState = purge_worker(Pid, State),
-            {noreply, NewState};
-        [] ->
-            NewState = purge_worker(Pid, State),
-            {noreply, NewState}
-    end;
+    NewState = purge_worker(Pid, State),
+    {noreply, NewState};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -346,6 +337,12 @@ cancel_worker_reap(State, Pid) ->
             ok;
         [] ->
            ok
+    end,
+    receive
+        {reap_worker, Pid} ->
+            ok
+    after 0 ->
+        ok
     end.
 
 purge_worker(Pid, State) ->
