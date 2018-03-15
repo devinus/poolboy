@@ -510,13 +510,13 @@ reuses_waiting_monitor_on_worker_exit() ->
 
     Self = self(),
     Pid = spawn(fun() ->
-        Worker = poolboy:checkout(Pool),
-        Self ! {worker, Worker},
+        Worker1 = poolboy:checkout(Pool),
+        Self ! {worker, Worker1},
         poolboy:checkout(Pool),
         receive ok -> ok end
     end),
 
-    Worker = receive {worker, Worker} -> Worker end,
+    Worker = receive {worker, Worker1} -> Worker1 end,
     Ref = monitor(process, Worker),
     exit(Worker, kill),
     receive

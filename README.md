@@ -1,8 +1,8 @@
 # Poolboy - A hunky Erlang worker pool factory
 
-[![Build Status](https://api.travis-ci.org/devinus/poolboy.svg?branch=master)](https://travis-ci.org/devinus/poolboy)
+[![Build Status](https://api.travis-ci.org/qingchuwudi/poolboy.svg?branch=master)](https://travis-ci.org/qingchuwudi/poolboy)
 
-[![Support via Gratipay](https://cdn.rawgit.com/gratipay/gratipay-badge/2.3.0/dist/gratipay.png)](https://gratipay.com/devinus/)
+[![Support via Gratipay](https://cdn.rawgit.com/gratipay/gratipay-badge/2.3.0/dist/gratipay.png)](https://gratipay.com/qingchuwudi/)
 
 Poolboy is a **lightweight**, **generic** pooling library for Erlang with a
 focus on **simplicity**, **performance**, and **rock-solid** disaster recovery.
