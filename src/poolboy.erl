@@ -56,8 +56,9 @@ checkout(Pool, Block, Timeout) ->
         gen_server:call(Pool, {checkout, CRef, Block}, Timeout)
     catch
         Class:Reason ->
+            Stack = erlang:get_stacktrace(),
             gen_server:cast(Pool, {cancel_waiting, CRef}),
-            erlang:raise(Class, Reason, erlang:get_stacktrace())
+            erlang:raise(Class, Reason, Stack)
     end.
 
 -spec checkin(Pool :: pool(), Worker :: pid()) -> ok.
