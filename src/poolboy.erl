@@ -29,8 +29,8 @@
 -type start_ret() :: {'ok', pid()} | 'ignore' | {'error', term()}.
 
 -record(state, {
-    supervisor :: pid(),
-    workers :: [pid()],
+    supervisor :: undefined | pid(),
+    workers :: undefined | [pid()],
     waiting :: pid_queue(),
     monitors :: ets:tid(),
     size = 5 :: non_neg_integer(),

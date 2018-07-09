@@ -1,0 +1,4 @@
+[{<<"stacktrace_compat">>,
+  {git,"https://github.com/g-andrade/stacktrace_compat.git",
+       {ref,"7c8d48f18f2474ba26546b65a63bd15c97fdc59a"}},
+  0}].
