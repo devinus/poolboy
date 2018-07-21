@@ -8,7 +8,8 @@ Poolboy is a **lightweight**, **generic** pooling library for Erlang with a
 focus on **simplicity**, **performance**, and **rock-solid** disaster recovery.
 
 ## Usage
-
+The most basic use case is to check out a worker, make a call and manually 
+return it to the pool when done
 ```erl-sh
 1> Worker = poolboy:checkout(PoolName).
 <0.9001.0>
@@ -17,7 +18,15 @@ ok
 3> poolboy:checkin(PoolName, Worker).
 ok
 ```
-
+Alternatively you can use a transaction which will return the worker to the 
+pool when the call is finished.
+```erl-sh
+poolboy:transaction(
+    PoolName,
+    fun(Worker) -> gen_server:call(Worker, Request) end, 
+    TransactionTimeout
+)
+```
 ## Example
 
 This is an example application showcasing database connection pools using
@@ -149,14 +158,54 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 ```
 
-## Options
+## Pool Options
 
-- `name`: the pool name
-- `worker_module`: the module that represents the workers
-- `size`: maximum pool size
-- `max_overflow`: maximum number of workers created if pool is empty
+- `name`: the pool name - optional
+- `worker_module`: the module that represents the workers - mandatory
+- `size`: maximum pool size - optional
+- `max_overflow`: maximum number of workers created if pool is empty - optional
 - `strategy`: `lifo` or `fifo`, determines whether checked in workers should be
-  placed first or last in the line of available workers. So, `lifo` operates like a traditional stack; `fifo` like a queue. Default is `lifo`.
+  placed first or last in the line of available workers. Default is `lifo`.
+- `overflow_ttl`: time in milliseconds you want to wait before removing overflow
+  workers. Useful when it's expensive to start workers. Default is 0.
+- `checkin_callback`: Optionally supply a function that accepts the following
+  options {Pid, normal} | {Pid, owner_death}. This can be used to perform health
+  checks on a worker or to reset connections if needed. The expected return values
+  are keep | kill atoms where poolboy will keep or terminate the worker before
+  checkin. If not in overflow state kill will start a new worker.
+  
+## Pool Status
+Returns : {Status, Workers, Overflow, InUse}
+- `Status`: ready | full | overflow
+            The ready atom indicates there are workers that are not checked out 
+            ready. The full atom indicates all workers including overflow are 
+            checked out. The overflow atom is used to describe the condition 
+            when all permanent workers are in use but there is overflow capacity
+            available.
+- `Workers`: Number of workers ready for use.
+- `Overflow`: Number of overflow workers started, should never exceed number 
+              specified by MaxOverflow when starting pool
+- `InUse`: Number of workers currently busy/checked out
+
+## Full Pool Status
+Returns a propslist of counters relating to a specified pool.  Useful
+for graphing the state of your pools
+- `size`: The defined size of the permanent worker pool
+- `max_overflow`: The maximum number of overflow workers allowed
+- `total_worker_count`: The total supervised workers. This includes
+    any workers waiting to be culled and not available to the
+    general pool
+- `ready_worker_count`: The count of workers available workers to be
+    used including overflow workers. Workers in this count may or may
+    not be checked out.
+- `checked_out_worker_count`: The count of workers that are currently
+    checked out
+- `overflow_worker_count`: The count of active overflow workers
+- `waiting_request_count`: The backlog of requests waiting to checkout
+    a worker
+- `total_workers_started`: The total number of workers started since the pool
+    started, good for measuring worker churn
+
 
 ## Authors
 
