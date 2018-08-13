@@ -24,6 +24,14 @@
     {global, GlobalName :: any()} |
     {via, Module :: atom(), ViaName :: any()}.
 
+-ifdef(OTP_RELEASE). %% this implies 21 or higher
+-define(EXCEPTION(Class, Reason, Stacktrace), Class:Reason:Stacktrace).
+-define(GET_STACK(Stacktrace), Stacktrace).
+-else.
+-define(EXCEPTION(Class, Reason, _), Class:Reason).
+-define(GET_STACK(_), erlang:get_stacktrace()).
+-endif.
+
 % Copied from gen:start_ret/0
 -type start_ret() :: {'ok', pid()} | 'ignore' | {'error', term()}.
 
@@ -84,10 +92,9 @@ checkout(Pool, Block, Timeout) ->
     try
         gen_server:call(Pool, {checkout, CRef, Block}, Timeout)
     catch
-        Class:Reason ->
-            Stack = erlang:get_stacktrace(),
+        ?EXCEPTION(Class, Reason, Stacktrace) ->
             gen_server:cast(Pool, {cancel_waiting, CRef}),
-            erlang:raise(Class, Reason, Stack)
+            erlang:raise(Class, Reason, ?GET_STACK(Stacktrace))
     end.
 
 -spec checkin(Pool :: pool(), Worker :: pid()) -> ok.
