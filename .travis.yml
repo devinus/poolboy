@@ -5,7 +5,6 @@ otp_release:
   - 19.3
   - 18.3
   - 17.4
-  - R16B03-1
 sudo: false
 script:
 - ./rebar3 do compile, dialyzer
