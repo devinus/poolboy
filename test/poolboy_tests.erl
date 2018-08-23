@@ -66,6 +66,12 @@ pool_test_() ->
             {<<"Check FIFO strategy">>,
                 fun fifo_strategy/0
             },
+            {<<"Pool extend one">>,
+                {timeout, 15, fun pool_extend_one/0}
+            },
+            {<<"Pool shrink one">>,
+                fun pool_shrink_one/0
+            },
             {<<"Pool reuses waiting monitor when a worker exits">>,
                 fun reuses_waiting_monitor_on_worker_exit/0
             },
@@ -159,6 +165,87 @@ pool_overflow() ->
     checkin_worker(Pid, G),
     ?assertEqual(5, length(pool_call(Pid, get_avail_workers))),
     ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
+    ?assertEqual(0, length(pool_call(Pid, get_all_monitors))),
+    ok = pool_call(Pid, stop).
+
+pool_extend_one() ->
+    %% Check that the pool extend one properly.
+    {ok, Pid} = new_pool(5, 2),
+    [A, B, C, D] = [poolboy:checkout(Pid) || _ <- lists:seq(0, 3)],
+    ?assertEqual(1, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
+    ?assertEqual(ok, poolboy:extend_one(Pid)),
+    ?assertEqual(2, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(6, length(pool_call(Pid, get_all_workers))),
+    [E, F] = [poolboy:checkout(Pid) || _ <- lists:seq(4, 5)],
+    ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(6, length(pool_call(Pid, get_all_workers))),
+    ?assertEqual(ok, poolboy:extend_one(Pid)),
+    ?assertEqual(ok, poolboy:extend_one(Pid)),
+    ?assertEqual(2, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(8, length(pool_call(Pid, get_all_workers))),
+    [G, H, I] = [poolboy:checkout(Pid) || _ <- lists:seq(6, 8)],
+    ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(9, length(pool_call(Pid, get_all_workers))),
+    ?assertEqual(ok, poolboy:extend_one(Pid)),
+    ?assertEqual(ok, poolboy:extend_one(Pid)),
+    ?assertEqual(1, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(10, length(pool_call(Pid, get_all_workers))),
+    Self = self(),
+    spawn(fun() ->
+        Workers = [poolboy:checkout(Pid) || _ <- lists:seq(9, 12)],
+        Self ! {got_workers, Workers}, timer:sleep(8000) % keep link
+    end),
+    timer:sleep(500), % ensure checkout operation executed
+    ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(12, length(pool_call(Pid, get_all_workers))),
+    ?assertEqual(ok, poolboy:extend_one(Pid)),
+    [J, K, L, M] = receive
+        {got_workers, Workers} -> Workers
+        after 500 -> ?assert(false)
+    end,
+    ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(13, length(pool_call(Pid, get_all_workers))),
+    checkin_worker(Pid, A),
+    checkin_worker(Pid, B),
+    checkin_worker(Pid, C),
+    checkin_worker(Pid, D),
+    checkin_worker(Pid, E),
+    checkin_worker(Pid, F),
+    checkin_worker(Pid, G),
+    checkin_worker(Pid, H),
+    checkin_worker(Pid, I),
+    checkin_worker(Pid, J),
+    checkin_worker(Pid, K),
+    checkin_worker(Pid, L),
+    checkin_worker(Pid, M),
+    ?assertEqual(11, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(11, length(pool_call(Pid, get_all_workers))),
+    ?assertEqual(0, length(pool_call(Pid, get_all_monitors))),
+    ok = pool_call(Pid, stop).
+
+pool_shrink_one() ->
+    %% Check that the pool shrink one properly.
+    {ok, Pid} = new_pool(5, 2),
+    [A, B, C, D] = [poolboy:checkout(Pid) || _ <- lists:seq(0, 3)],
+    ?assertEqual(1, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
+    ?assertEqual(ok, poolboy:shrink_one(Pid)),
+    ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(4, length(pool_call(Pid, get_all_workers))),
+    ?assertEqual({error, no_avail_workers}, poolboy:shrink_one(Pid)),
+    [E, F] = [poolboy:checkout(Pid) || _ <- lists:seq(4, 5)],
+    ?assertEqual({error, no_avail_workers}, poolboy:shrink_one(Pid)),
+    ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(6, length(pool_call(Pid, get_all_workers))),
+    checkin_worker(Pid, A),
+    checkin_worker(Pid, B),
+    checkin_worker(Pid, C),
+    checkin_worker(Pid, D),
+    checkin_worker(Pid, E),
+    checkin_worker(Pid, F),
+    ?assertEqual(4, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(4, length(pool_call(Pid, get_all_workers))),
     ?assertEqual(0, length(pool_call(Pid, get_all_monitors))),
     ok = pool_call(Pid, stop).
 

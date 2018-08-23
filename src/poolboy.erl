@@ -4,8 +4,9 @@
 -behaviour(gen_server).
 
 -export([checkout/1, checkout/2, checkout/3, checkin/2, transaction/2,
-         transaction/3, child_spec/2, child_spec/3, child_spec/4, start/1,
-         start/2, start_link/1, start_link/2, stop/1, status/1]).
+         transaction/3, child_spec/2, child_spec/3, start/1, start/2,
+         start_link/1, start_link/2, stop/1, status/1, extend_one/1,
+         shrink_one/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
          code_change/3]).
 -export_type([pool/0]).
@@ -145,12 +146,24 @@ stop(Pool) ->
 status(Pool) ->
     gen_server:call(Pool, status).
 
+-spec extend_one(Pool :: pool()) -> ok.
+extend_one(Pool) ->
+    gen_server:call(Pool, extend_one).
+
+-spec shrink_one(Pool :: pool()) -> ok | {error, term()}.
+shrink_one(Pool) ->
+    gen_server:call(Pool, shrink_one).
+
+
 init({PoolArgs, WorkerArgs}) ->
     process_flag(trap_exit, true),
     Waiting = queue:new(),
     Monitors = ets:new(monitors, [private]),
     init(PoolArgs, WorkerArgs, #state{waiting = Waiting, monitors = Monitors}).
 
+init([{cooldown, Cooldown} | Rest], WorkerArgs, State) when is_integer(Cooldown) ->
+    timer:sleep(Cooldown),
+    init(Rest, WorkerArgs, State);
 init([{worker_module, Mod} | Rest], WorkerArgs, State) when is_atom(Mod) ->
     {ok, Sup} = poolboy_sup:start_link(Mod, WorkerArgs),
     init(Rest, WorkerArgs, State#state{supervisor = Sup});
@@ -222,7 +235,31 @@ handle_call({checkout, CRef, Block}, {FromPid, _} = From, State) ->
             Waiting = queue:in({From, CRef, MRef}, State#state.waiting),
             {noreply, State#state{waiting = Waiting}}
     end;
-
+handle_call(extend_one, _From, #state{size = Size, overflow = Overflow} = State) ->
+    case queue:out(State#state.waiting) of
+    {{value, {From, CRef, MRef}}, Waiting2} ->
+        Pid = new_worker(State#state.supervisor),
+        true = ets:insert(State#state.monitors, {Pid, CRef, MRef}),
+        gen_server:reply(From, Pid),
+        {reply, ok, State#state{size = Size + 1, waiting = Waiting2}};
+    {empty, _Empty} when Overflow > 0 ->
+        {reply, ok, State#state{size = Size + 1, overflow = Overflow - 1}};
+    {empty, _Empty} ->
+        Pid = new_worker(State#state.supervisor),
+        Workers2 = case State#state.strategy of
+            lifo -> [Pid | State#state.workers];
+            fifo -> State#state.workers ++ [Pid]
+        end,
+        {reply, ok, State#state{size = Size + 1, workers = Workers2}}
+    end;
+handle_call(shrink_one, _From, #state{size = Size} = State) ->
+    case State#state.workers of
+    [Pid | Workers2] ->
+        ok = dismiss_worker(State#state.supervisor, Pid),
+        {reply, ok, State#state{size = Size - 1, workers = Workers2}};
+    [] ->
+        {reply, {error, no_avail_workers}, State}
+    end;
 handle_call(status, _From, State) ->
     #state{workers = Workers,
            monitors = Monitors,
