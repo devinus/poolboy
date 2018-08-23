@@ -19,6 +19,14 @@
 -type pid_queue() :: queue:queue().
 -endif.
 
+-ifdef(OTP_RELEASE). %% this implies 21 or higher
+-define(EXCEPTION(Class, Reason, Stacktrace), Class:Reason:Stacktrace).
+-define(GET_STACK(Stacktrace), Stacktrace).
+-else.
+-define(EXCEPTION(Class, Reason, _), Class:Reason).
+-define(GET_STACK(_), erlang:get_stacktrace()).
+-endif.
+
 -type pool() ::
     Name :: (atom() | pid()) |
     {Name :: atom(), node()} |
@@ -30,8 +38,8 @@
 -type start_ret() :: {'ok', pid()} | 'ignore' | {'error', term()}.
 
 -record(state, {
-    supervisor :: pid(),
-    workers :: [pid()],
+    supervisor :: undefined | pid(),
+    workers = [] :: [pid()],
     waiting :: pid_queue(),
     monitors :: ets:tid(),
     size = 5 :: non_neg_integer(),
@@ -55,9 +63,9 @@ checkout(Pool, Block, Timeout) ->
     try
         gen_server:call(Pool, {checkout, CRef, Block}, Timeout)
     catch
-        Class:Reason ->
+        ?EXCEPTION(Class, Reason, Stacktrace) ->
             gen_server:cast(Pool, {cancel_waiting, CRef}),
-            erlang:raise(Class, Reason, erlang:get_stacktrace())
+            erlang:raise(Class, Reason, ?GET_STACK(Stacktrace))
     end.
 
 -spec checkin(Pool :: pool(), Worker :: pid()) -> ok.
@@ -89,8 +97,23 @@ child_spec(PoolId, PoolArgs) ->
                  WorkerArgs :: proplists:proplist())
     -> supervisor:child_spec().
 child_spec(PoolId, PoolArgs, WorkerArgs) ->
+    child_spec(PoolId, PoolArgs, WorkerArgs, tuple).
+
+-spec child_spec(PoolId :: term(),
+                 PoolArgs :: proplists:proplist(),
+                 WorkerArgs :: proplists:proplist(),
+                 ChildSpecFormat :: 'tuple' | 'map')
+    -> supervisor:child_spec().
+child_spec(PoolId, PoolArgs, WorkerArgs, tuple) ->
     {PoolId, {poolboy, start_link, [PoolArgs, WorkerArgs]},
-     permanent, 5000, worker, [poolboy]}.
+     permanent, 5000, worker, [poolboy]};
+child_spec(PoolId, PoolArgs, WorkerArgs, map) ->
+    #{id => PoolId,
+      start => {poolboy, start_link, [PoolArgs, WorkerArgs]},
+      restart => permanent,
+      shutdown => 5000,
+      type => worker,
+      modules => [poolboy]}.
 
 -spec start(PoolArgs :: proplists:proplist())
     -> start_ret().
