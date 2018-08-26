@@ -1,8 +1,7 @@
 # Poolboy - A hunky Erlang worker pool factory
 
-[![Build Status](https://api.travis-ci.org/devinus/poolboy.svg?branch=master)](https://travis-ci.org/devinus/poolboy)
+[![Build Status](https://api.travis-ci.org/comtihon/poolboy.svg?branch=master)](https://travis-ci.org/comtihon/poolboy)
 
-[![Support via Gratipay](https://cdn.rawgit.com/gratipay/gratipay-badge/2.3.0/dist/gratipay.png)](https://gratipay.com/devinus/)
 
 Poolboy is a **lightweight**, **generic** pooling library for Erlang with a
 focus on **simplicity**, **performance**, and **rock-solid** disaster recovery.
@@ -161,7 +160,14 @@ code_change(_OldVsn, State, _Extra) ->
 ## Pool Options
 
 - `name`: the pool name - optional
-- `worker_module`: the module that represents the workers - mandatory
+- `worker_module`: worker module. Can be either a `module` or `{module, function}`.
+Example:
+```
+start_pool(SizeArgs, WorkerArgs) ->
+  PoolArgs = [{worker_module, {mc_worker_api, connect}}] ++ SizeArgs,
+  supervisor:start_child(?MODULE, [PoolArgs, WorkerArgs]).
+```
+In case of just atom `start_link` will be called.
 - `size`: maximum pool size - optional
 - `max_overflow`: maximum number of workers created if pool is empty - optional
 - `strategy`: `lifo` or `fifo`, determines whether checked in workers should be
@@ -183,15 +189,3 @@ Returns : {Status, Workers, Overflow, InUse}
 - `Overflow`: Number of overflow workers started, should never exceed number 
               specified by MaxOverflow when starting pool
 - `InUse`: Number of workers currently busy/checked out
-
-## Authors
-
-- Devin Torres (devinus) <devin@devintorres.com>
-- Andrew Thompson (Vagabond) <andrew@hijacked.us>
-- Kurt Williams (onkel-dirtus) <kurt.r.williams@gmail.com>
-
-## License
-
-Poolboy is available in the public domain (see `UNLICENSE`).
-Poolboy is also optionally available under the ISC license (see `LICENSE`),
-meant especially for jurisdictions that do not recognize public domain works.
