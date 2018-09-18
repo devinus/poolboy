@@ -72,7 +72,10 @@ pool_test_() ->
             {<<"Recover from timeout without exit handling">>,
                 fun transaction_timeout_without_exit/0},
             {<<"Recover from transaction timeout">>,
-                fun transaction_timeout/0}
+                fun transaction_timeout/0},
+            {<<"Pool with workers using different arguments">>,
+                fun pool_dyn_worker_args/0
+            }
         ]
     }.
 
@@ -92,6 +95,27 @@ checkin_worker(Pid, Worker) ->
     poolboy:checkin(Pid, Worker),
     timer:sleep(500).
 
+pool_dyn_worker_args() ->
+    %% Check pool operation when arguments for each worker is dynamic.
+    %% Size of workers is decided by length of args.
+    Args = [ [N] || N <- lists:seq(1, 10) ],
+    {ok, Pid} = new_dyn_pool(Args, 5, lifo),
+    ?assertEqual(10, length(pool_call(Pid, get_avail_workers))),
+    Worker0 = poolboy:checkout(Pid),
+    %% Check if state of worker is the same of args.
+    {ok, State0} = gen_server:call(Worker0, get_info),
+    ?assertEqual(10, State0),
+    ?assertEqual(9, length(pool_call(Pid, get_avail_workers))),
+    Worker = poolboy:checkout(Pid),
+    % Check again if state of worker is the same of args.
+    {ok, State} = gen_server:call(Worker, get_info),
+    ?assertEqual(9, State),
+    ?assertEqual(8, length(pool_call(Pid, get_avail_workers))),
+    checkin_worker(Pid, Worker),
+    ?assertEqual(9, length(pool_call(Pid, get_avail_workers))),
+    ?assertEqual(1, length(pool_call(Pid, get_all_monitors))),
+    
+    ok = pool_call(Pid, stop).
 
 transaction_timeout_without_exit() ->
     {ok, Pid} = new_pool(1, 0),
@@ -545,6 +569,11 @@ new_pool(Size, MaxOverflow, Strategy) ->
                         {worker_module, poolboy_test_worker},
                         {size, Size}, {max_overflow, MaxOverflow},
                         {strategy, Strategy}]).
+
+new_dyn_pool(Args, MaxOverflow, Strategy) ->
+    poolboy:start_link([{name, {local, poolboy_test}},
+                        {worker_module, {poolboy_test_worker_dyn, Args}},
+                        {max_overflow, MaxOverflow}, {strategy, Strategy}]).
 
 pool_call(ServerRef, Request) ->
     gen_server:call(ServerRef, Request).
