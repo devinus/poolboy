@@ -36,8 +36,16 @@
 % Copied from gen:start_ret/0
 -type start_ret() :: {'ok', pid()} | 'ignore' | {'error', term()}.
 
+% Copied from supervisor:sup_ref/0
+-type sup_ref() ::
+    (Name :: atom()) |
+    {Name :: atom(), Node :: node()} |
+    {global, Name :: atom()} |
+    {via, Module :: module(), Name :: any()} |
+    pid().
+
 -record(state, {
-    supervisor :: undefined | pid(),
+    supervisor :: undefined | sup_ref(),
     workers :: undefined | pid_queue(),
     waiting :: pid_queue(),
     monitors :: ets:tid(),
@@ -151,9 +159,28 @@ init({PoolArgs, WorkerArgs}) ->
     Monitors = ets:new(monitors, [private]),
     init(PoolArgs, WorkerArgs, #state{waiting = Waiting, monitors = Monitors}).
 
+init([{worker_supervisor, Sup = {Scope, _Name}} | Rest], WorkerArgs, State)
+  when Scope =:= local orelse Scope =:= global ->
+    init(Rest, WorkerArgs, State#state{supervisor=Sup});
+init([{worker_supervisor, Sup = {_Name, Node}} | Rest], WorkerArgs, State) ->
+    (catch erlang:monitor_node(Node, true)),
+    init(Rest, WorkerArgs, State#state{supervisor=Sup});
+init([{worker_supervisor, Sup} | Rest], WorkerArgs, State)
+  when is_pid(Sup) orelse is_atom(Sup) orelse is_tuple(Sup) ->
+    init(Rest, WorkerArgs, State#state{supervisor=Sup});
 init([{worker_module, Mod} | Rest], WorkerArgs, State) when is_atom(Mod) ->
-    {ok, Sup} = poolboy_sup:start_link(Mod, WorkerArgs),
-    init(Rest, WorkerArgs, State#state{supervisor = Sup});
+    {ok, Sup} =
+    case poolboy_sup:start_link(Mod, WorkerArgs) of
+        {ok, _Pid} = Ok -> Ok;
+        {error, {already_started, Pid}} ->
+            MRef = erlang:monitor(process, Pid),
+            receive
+                {'DOWN', MRef, _, _, _} -> ok
+            after ?TIMEOUT -> ok
+            end,
+            poolboy_sup:start_link(Mod, WorkerArgs)
+    end,
+    init(Rest, WorkerArgs, State#state{supervisor=Sup});
 init([{size, Size} | Rest], WorkerArgs, State) when is_integer(Size) ->
     init(Rest, WorkerArgs, State#state{size = Size});
 init([{max_overflow, MaxOverflow} | Rest], WorkerArgs, State) when is_integer(MaxOverflow) ->
@@ -275,6 +302,8 @@ handle_info({'EXIT', Pid, _Reason}, State) ->
                     {noreply, State}
             end
     end;
+handle_info({nodedown, Node}, State = #state{supervisor = {_, Node}}) ->
+    {stop, nodedown, State};
 
 handle_info(_Info, State) ->
     {noreply, State}.
