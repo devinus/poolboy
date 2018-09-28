@@ -308,10 +308,12 @@ handle_info({nodedown, Node}, State = #state{supervisor = {_, Node}}) ->
 handle_info(_Info, State) ->
     {noreply, State}.
 
-terminate(_Reason, State) ->
+terminate(_Reason, State = #state{supervisor = Sup}) ->
     Workers = queue:to_list(State#state.workers),
     ok = lists:foreach(fun (W) -> unlink(W) end, Workers),
-    true = exit(State#state.supervisor, shutdown),
+    if is_pid(Sup) -> true = exit(Sup, shutdown);
+       true -> ok = gen_server:stop(Sup)
+    end,
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
