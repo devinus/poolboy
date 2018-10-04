@@ -57,6 +57,9 @@ pool_test_() ->
             {<<"Pool demonitors when a checkout is cancelled">>,
                 fun demonitors_when_checkout_cancelled/0
             },
+            {<<"Pool restarts workers due to max age option">>,
+               fun restart_workers_age/0
+            },
             {<<"Check that LIFO is the default strategy">>,
                 fun default_strategy_lifo/0
             },
@@ -503,6 +506,28 @@ fifo_strategy() ->
     Worker2 = poolboy:checkout(Pid),
     ?assert(Worker1 =/= Worker2),
     Worker1 = poolboy:checkout(Pid),
+    poolboy:stop(Pid).
+
+restart_workers_age() ->
+    Size = 1,
+    MaxOverflow = 0,
+    {ok, Pid} = poolboy:start_link([{name, {local, poolboy_test}},
+                                    {worker_module, poolboy_test_worker},
+                                    {max_age, 1000},
+                                    {size, Size}, {max_overflow, MaxOverflow}]),
+    Worker1 = poolboy:checkout(Pid),
+    Worker2 = poolboy:checkout(Pid),
+    ?assert(Worker1 =/= Worker2),
+    %% Make sure the worker is restarted although we did a checkout / checkin
+    ok = poolboy:checkin(Pid, Worker1),
+    ok = poolboy:checkin(Pid, Worker2),
+    timer:sleep(2000),
+    Worker3 = poolboy:checkout(Pid),
+    Worker4 = poolboy:checkout(Pid),
+    ?assert(Worker3 =/= Worker1),
+    ?assert(Worker3 =/= Worker2),
+    ?assert(Worker4 =/= Worker1),
+    ?assert(Worker4 =/= Worker2),
     poolboy:stop(Pid).
 
 reuses_waiting_monitor_on_worker_exit() ->

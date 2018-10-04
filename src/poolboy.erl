@@ -5,7 +5,8 @@
 
 -export([checkout/1, checkout/2, checkout/3, checkin/2, transaction/2,
          transaction/3, child_spec/2, child_spec/3, child_spec/4, start/1,
-         start/2, start_link/1, start_link/2, stop/1, status/1]).
+         start/2, start_link/1, start_link/2, stop/1, status/1,
+         restart_workers/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
          code_change/3]).
 -export_type([pool/0]).
@@ -44,6 +45,7 @@
     size = 5 :: non_neg_integer(),
     overflow = 0 :: non_neg_integer(),
     max_overflow = 10 :: non_neg_integer(),
+    max_age :: undefined | integer(),
     strategy = lifo :: lifo | fifo
 }).
 
@@ -145,6 +147,10 @@ stop(Pool) ->
 status(Pool) ->
     gen_server:call(Pool, status).
 
+-spec restart_workers(Pool :: pool()) -> ok.
+restart_workers(Pool) ->
+    gen_server:call(Pool, restart_workers).
+
 init({PoolArgs, WorkerArgs}) ->
     process_flag(trap_exit, true),
     Waiting = queue:new(),
@@ -156,6 +162,8 @@ init([{worker_module, Mod} | Rest], WorkerArgs, State) when is_atom(Mod) ->
     init(Rest, WorkerArgs, State#state{supervisor = Sup});
 init([{size, Size} | Rest], WorkerArgs, State) when is_integer(Size) ->
     init(Rest, WorkerArgs, State#state{size = Size});
+init([{max_age, MaxAge} | Rest], WorkerArgs, State) when is_integer(MaxAge) ->
+    init(Rest, WorkerArgs, State#state{max_age = MaxAge});
 init([{max_overflow, MaxOverflow} | Rest], WorkerArgs, State) when is_integer(MaxOverflow) ->
     init(Rest, WorkerArgs, State#state{max_overflow = MaxOverflow});
 init([{strategy, lifo} | Rest], WorkerArgs, State) ->
@@ -166,6 +174,10 @@ init([_ | Rest], WorkerArgs, State) ->
     init(Rest, WorkerArgs, State);
 init([], _WorkerArgs, #state{size = Size, supervisor = Sup} = State) ->
     Workers = prepopulate(Size, Sup),
+    case State#state.max_age of
+        undefined -> ok;
+        MaxAge    -> timer:apply_after(MaxAge, ?MODULE, restart_workers, [self()])
+    end,
     {ok, State#state{workers = Workers}}.
 
 handle_cast({checkin, Pid}, State = #state{monitors = Monitors}) ->
@@ -223,6 +235,15 @@ handle_call({checkout, CRef, Block}, {FromPid, _} = From, State) ->
             {noreply, State#state{waiting = Waiting}}
     end;
 
+handle_call(restart_workers, _From, State) ->
+    Sup = State#state.supervisor,
+    WorkerList = supervisor:which_children(Sup),
+    NewWorkers = lists:map(fun({_Id, Child, _Type, _Modules}) ->
+                                   supervisor:terminate_child(Sup, Child),
+                                   new_worker(Sup)
+                           end, WorkerList),
+    timer:apply_after(State#state.max_age, ?MODULE, restart_workers, [self()]),
+    {reply, ok, State#state{workers=NewWorkers}};
 handle_call(status, _From, State) ->
     #state{workers = Workers,
            monitors = Monitors,
