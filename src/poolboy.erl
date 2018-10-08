@@ -284,9 +284,10 @@ handle_info({'DOWN', MRef, _, _, _}, State) ->
             Waiting = queue:filter(fun ({_, _, R}) -> R =/= MRef end, State#state.waiting),
             {noreply, State#state{waiting = Waiting}}
     end;
-handle_info({'EXIT', Pid, _Reason}, State) ->
+handle_info({'EXIT', Pid, Reason}, State) ->
     #state{supervisor = Sup,
            monitors = Monitors} = State,
+    Next =
     case ets:lookup(Monitors, Pid) of
         [{Pid, _, MRef}] ->
             true = erlang:demonitor(MRef),
@@ -301,19 +302,21 @@ handle_info({'EXIT', Pid, _Reason}, State) ->
                 false ->
                     {noreply, State}
             end
+    end,
+    case {Sup, erlang:node(Pid)} of
+        {{_, Node}, Node} -> {stop, Reason, State#state{supervisor = undefined}};
+        {Pid, _} -> {stop, Reason, State#state{supervisor = undefined}};
+        _ -> Next
     end;
 handle_info({nodedown, Node}, State = #state{supervisor = {_, Node}}) ->
-    {stop, nodedown, State};
-
+    {stop, nodedown, State#state{supervisor = undefined}};
 handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(_Reason, State = #state{supervisor = Sup}) ->
     Workers = queue:to_list(State#state.workers),
     ok = lists:foreach(fun (W) -> unlink(W) end, Workers),
-    if is_pid(Sup) -> true = exit(Sup, shutdown);
-       true -> ok = gen_server:stop(Sup)
-    end,
+    stop_supervisor(Sup),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -406,3 +409,12 @@ state_name(#state{overflow = MaxOverflow, max_overflow = MaxOverflow}) ->
     full;
 state_name(_State) ->
     overflow.
+
+stop_supervisor(undefined) -> ok;
+stop_supervisor(Pid) when is_pid(Pid) ->
+    case erlang:node(Pid) of
+        N when N == node() -> exit(Pid, shutdown);
+        _ -> gen_server:stop(Pid)
+    end;
+stop_supervisor(Tuple) when is_tuple(Tuple) ->
+    gen_server:stop(Tuple).
