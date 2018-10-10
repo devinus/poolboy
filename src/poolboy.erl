@@ -313,10 +313,10 @@ handle_info({nodedown, Node}, State = #state{supervisor = {_, Node}}) ->
 handle_info(_Info, State) ->
     {noreply, State}.
 
-terminate(_Reason, State = #state{supervisor = Sup}) ->
+terminate(Reason, State = #state{supervisor = Sup}) ->
     Workers = queue:to_list(State#state.workers),
     ok = lists:foreach(fun (W) -> unlink(W) end, Workers),
-    stop_supervisor(Sup),
+    stop_supervisor(Reason, Sup),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -410,11 +410,13 @@ state_name(#state{overflow = MaxOverflow, max_overflow = MaxOverflow}) ->
 state_name(_State) ->
     overflow.
 
-stop_supervisor(undefined) -> ok;
-stop_supervisor(Pid) when is_pid(Pid) ->
+stop_supervisor(_, undefined) -> ok;
+stop_supervisor(Reason, Pid) when is_pid(Pid) ->
     case erlang:node(Pid) of
-        N when N == node() -> exit(Pid, shutdown);
-        _ -> gen_server:stop(Pid)
+        N when N == node() -> exit(Pid, Reason);
+        _ when Reason =/= nodedown -> catch gen_server:stop(Pid, Reason, ?TIMEOUT);
+        _ -> ok
     end;
-stop_supervisor(Tuple) when is_tuple(Tuple) ->
-    gen_server:stop(Tuple).
+stop_supervisor(nodedown, Tuple) when is_tuple(Tuple) -> ok;
+stop_supervisor(Reason, Tuple) when is_tuple(Tuple) ->
+    catch gen_server:stop(Tuple, Reason, ?TIMEOUT).
