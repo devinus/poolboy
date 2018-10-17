@@ -147,6 +147,7 @@ status(Pool) ->
 
 init({PoolArgs, WorkerArgs}) ->
     process_flag(trap_exit, true),
+    io:fwrite("#MESSAGE : ~p starting poolboy server~n", [self()]),
     Waiting = queue:new(),
     Monitors = ets:new(monitors, [private]),
     init(PoolArgs, WorkerArgs, #state{waiting = Waiting, monitors = Monitors}).
