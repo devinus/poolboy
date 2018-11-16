@@ -72,7 +72,9 @@ pool_test_() ->
             {<<"Recover from timeout without exit handling">>,
                 fun transaction_timeout_without_exit/0},
             {<<"Recover from transaction timeout">>,
-                fun transaction_timeout/0}
+                fun transaction_timeout/0},
+            {<<"Worker death synchronisation">>,
+                fun async_worker_death/0}
         ]
     }.
 
@@ -91,6 +93,26 @@ checkin_worker(Pid, Worker) ->
     %% worker. The only solution seems to be a nasty hardcoded sleep.
     poolboy:checkin(Pid, Worker),
     timer:sleep(500).
+
+async_worker_death() ->
+    {ok, Pid} = new_pool(1, 0),
+    ?assertEqual(
+        ok,
+        poolboy:transaction(
+            Pid,
+            fun(Worker) ->
+                gen_server:cast(Worker, die)
+            end)
+    ),
+    ?assertEqual(
+        ok,
+        poolboy:transaction(
+            Pid,
+            fun(Worker) ->
+                pool_call(Worker, check)
+            end)
+    ).
+
 
 
 transaction_timeout_without_exit() ->
