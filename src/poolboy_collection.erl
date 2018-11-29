@@ -139,8 +139,9 @@ data_replace(OutIndex, Out, In, Data) when is_function(In, 1) andalso is_list(Da
 data_replace(OutIndex, Out, In, Data) when is_function(In, 1) andalso is_tuple(Data) ->
     case array:is_array(Data) of
         true ->
-            Out = array:get(OutIndex, Data),
-            array:set(OutIndex, In(OutIndex), Data);
+            ArrIndex = OutIndex-1,
+            Out = array:get(ArrIndex, Data),
+            array:set(ArrIndex, In(OutIndex), Data);
         false when element(OutIndex, Data) == Out ->
             setelement(OutIndex, Data, In(OutIndex))
     end.

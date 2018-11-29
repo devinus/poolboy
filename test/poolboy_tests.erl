@@ -3,76 +3,83 @@
 -include_lib("eunit/include/eunit.hrl").
 
 pool_test_() ->
-    {foreach,
-        fun() ->
+    {foreachx,
+        fun(_) ->
             error_logger:tty(false)
         end,
-        fun(_) ->
+        fun(_, _) ->
             case whereis(poolboy_test) of
                 undefined -> ok;
                 Pid -> pool_call(Pid, stop)
             end,
             error_logger:tty(true)
         end,
+        [ {Type,
+           fun(T, _) ->
+                   {<<(atom_to_binary(T, latin1))/binary, <<": ">>/binary, Title/binary>>, fun() -> Test(T) end}
+           end} || Type <- [list, array, tuple], {Title, Test} <-
         [
             {<<"Basic pool operations">>,
-                fun pool_startup/0
+                fun pool_startup/1
             },
             {<<"Pool overflow should work">>,
-                fun pool_overflow/0
+                fun pool_overflow/1
             },
             {<<"Pool behaves when empty">>,
-                fun pool_empty/0
+                fun pool_empty/1
             },
             {<<"Pool behaves when empty and oveflow is disabled">>,
-                fun pool_empty_no_overflow/0
+                fun pool_empty_no_overflow/1
             },
             {<<"Pool behaves on worker death">>,
-                fun worker_death/0
+                fun worker_death/1
             },
             {<<"Pool behaves when full and a worker dies">>,
-                fun worker_death_while_full/0
+                fun worker_death_while_full/1
             },
             {<<"Pool behaves when full, a worker dies and overflow disabled">>,
-                fun worker_death_while_full_no_overflow/0
+                fun worker_death_while_full_no_overflow/1
             },
             {<<"Non-blocking pool behaves when full and overflow disabled">>,
-                fun pool_full_nonblocking_no_overflow/0
+                fun pool_full_nonblocking_no_overflow/1
             },
             {<<"Non-blocking pool behaves when full">>,
-                fun pool_full_nonblocking/0
+                fun pool_full_nonblocking/1
             },
             {<<"Pool behaves on owner death">>,
-                fun owner_death/0
+                fun owner_death/1
             },
             {<<"Worker checked-in after an exception in a transaction">>,
-                fun checkin_after_exception_in_transaction/0
+                fun checkin_after_exception_in_transaction/1
             },
             {<<"Pool returns status">>,
-                fun pool_returns_status/0
+                fun pool_returns_status/1
             },
             {<<"Pool demonitors previously waiting processes">>,
-                fun demonitors_previously_waiting_processes/0
+                fun demonitors_previously_waiting_processes/1
             },
             {<<"Pool demonitors when a checkout is cancelled">>,
-                fun demonitors_when_checkout_cancelled/0
+                fun demonitors_when_checkout_cancelled/1
             },
             {<<"Check that LIFO is the default strategy">>,
-                fun default_strategy_lifo/0
+                fun default_strategy_lifo/1
             },
             {<<"Check LIFO strategy">>,
-                fun lifo_strategy/0
+                fun lifo_strategy/1
             },
             {<<"Check FIFO strategy">>,
-                fun fifo_strategy/0
+                fun fifo_strategy/1
             },
             {<<"Pool reuses waiting monitor when a worker exits">>,
-                fun reuses_waiting_monitor_on_worker_exit/0
+                fun reuses_waiting_monitor_on_worker_exit/1
             },
             {<<"Recover from timeout without exit handling">>,
-                fun transaction_timeout_without_exit/0},
+                fun transaction_timeout_without_exit/1
+            },
             {<<"Recover from transaction timeout">>,
-                fun transaction_timeout/0}
+                fun transaction_timeout/1
+            }
+        ]
         ]
     }.
 
@@ -93,8 +100,8 @@ checkin_worker(Pid, Worker) ->
     timer:sleep(500).
 
 
-transaction_timeout_without_exit() ->
-    {ok, Pid} = new_pool(1, 0),
+transaction_timeout_without_exit(Type) ->
+    {ok, Pid} = new_pool(1, 0, lifo, Type),
     ?assertEqual({ready,1,0,0}, pool_call(Pid, status)),
     WorkerList = pool_call(Pid, get_all_workers),
     ?assertMatch([_], WorkerList),
@@ -108,8 +115,8 @@ transaction_timeout_without_exit() ->
     ?assertEqual({ready,1,0,0}, pool_call(Pid, status)).
 
 
-transaction_timeout() ->
-    {ok, Pid} = new_pool(1, 0),
+transaction_timeout(Type) ->
+    {ok, Pid} = new_pool(1, 0, lifo, Type),
     ?assertEqual({ready,1,0,0}, pool_call(Pid, status)),
     WorkerList = pool_call(Pid, get_all_workers),
     ?assertMatch([_], WorkerList),
@@ -124,9 +131,9 @@ transaction_timeout() ->
     ?assertEqual({ready,1,0,0}, pool_call(Pid, status)).
 
 
-pool_startup() ->
+pool_startup(Type) ->
     %% Check basic pool operation.
-    {ok, Pid} = new_pool(10, 5),
+    {ok, Pid} = new_pool(10, 5, lifo, Type),
     ?assertEqual(10, length(pool_call(Pid, get_avail_workers))),
     poolboy:checkout(Pid),
     ?assertEqual(9, length(pool_call(Pid, get_avail_workers))),
@@ -137,9 +144,9 @@ pool_startup() ->
     ?assertEqual(1, length(pool_call(Pid, get_all_monitors))),
     ok = pool_call(Pid, stop).
 
-pool_overflow() ->
+pool_overflow(Type) ->
     %% Check that the pool overflows properly.
-    {ok, Pid} = new_pool(5, 5),
+    {ok, Pid} = new_pool(5, 5, lifo, Type),
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 6)],
     ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
     ?assertEqual(7, length(pool_call(Pid, get_all_workers))),
@@ -162,10 +169,10 @@ pool_overflow() ->
     ?assertEqual(0, length(pool_call(Pid, get_all_monitors))),
     ok = pool_call(Pid, stop).
 
-pool_empty() ->
+pool_empty(Type) ->
     %% Checks that the the pool handles the empty condition correctly when
     %% overflow is enabled.
-    {ok, Pid} = new_pool(5, 2),
+    {ok, Pid} = new_pool(5, 2, lifo, Type),
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 6)],
     ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
     ?assertEqual(7, length(pool_call(Pid, get_all_workers))),
@@ -208,10 +215,10 @@ pool_empty() ->
     ?assertEqual(0, length(pool_call(Pid, get_all_monitors))),
     ok = pool_call(Pid, stop).
 
-pool_empty_no_overflow() ->
+pool_empty_no_overflow(Type) ->
     %% Checks the pool handles the empty condition properly when overflow is
     %% disabled.
-    {ok, Pid} = new_pool(5, 0),
+    {ok, Pid} = new_pool(5, 0, lifo, Type),
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 4)],
     ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
     ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
@@ -250,10 +257,10 @@ pool_empty_no_overflow() ->
     ?assertEqual(0, length(pool_call(Pid, get_all_monitors))),
     ok = pool_call(Pid, stop).
 
-worker_death() ->
+worker_death(Type) ->
     %% Check that dead workers are only restarted when the pool is not full
     %% and the overflow count is 0. Meaning, don't restart overflow workers.
-    {ok, Pid} = new_pool(5, 2),
+    {ok, Pid} = new_pool(5, 2, lifo, Type),
     Worker = poolboy:checkout(Pid),
     kill_worker(Worker),
     ?assertEqual(5, length(pool_call(Pid, get_avail_workers))),
@@ -270,11 +277,11 @@ worker_death() ->
     ?assertEqual(4, length(pool_call(Pid, get_all_monitors))),
     ok = pool_call(Pid, stop).
 
-worker_death_while_full() ->
+worker_death_while_full(Type) ->
     %% Check that if a worker dies while the pool is full and there is a
     %% queued checkout, a new worker is started and the checkout serviced.
     %% If there are no queued checkouts, a new worker is not started.
-    {ok, Pid} = new_pool(5, 2),
+    {ok, Pid} = new_pool(5, 2, lifo, Type),
     Worker = poolboy:checkout(Pid),
     kill_worker(Worker),
     ?assertEqual(5, length(pool_call(Pid, get_avail_workers))),
@@ -311,11 +318,11 @@ worker_death_while_full() ->
     ?assertEqual(6, length(pool_call(Pid, get_all_monitors))),
     ok = pool_call(Pid, stop).
 
-worker_death_while_full_no_overflow() ->
+worker_death_while_full_no_overflow(Type) ->
     %% Check that if a worker dies while the pool is full and there's no
     %% overflow, a new worker is started unconditionally and any queued
     %% checkouts are serviced.
-    {ok, Pid} = new_pool(5, 0),
+    {ok, Pid} = new_pool(5, 0, lifo, Type),
     Worker = poolboy:checkout(Pid),
     kill_worker(Worker),
     ?assertEqual(5, length(pool_call(Pid, get_avail_workers))),
@@ -354,10 +361,10 @@ worker_death_while_full_no_overflow() ->
     ?assertEqual(3, length(pool_call(Pid, get_all_monitors))),
     ok = pool_call(Pid, stop).
 
-pool_full_nonblocking_no_overflow() ->
+pool_full_nonblocking_no_overflow(Type) ->
     %% Check that when the pool is full, checkouts return 'full' when the
     %% option to use non-blocking checkouts is used.
-    {ok, Pid} = new_pool(5, 0),
+    {ok, Pid} = new_pool(5, 0, lifo, Type),
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 4)],
     ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
     ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
@@ -369,10 +376,10 @@ pool_full_nonblocking_no_overflow() ->
     ?assertEqual(5, length(pool_call(Pid, get_all_monitors))),
     ok = pool_call(Pid, stop).
 
-pool_full_nonblocking() ->
+pool_full_nonblocking(Type) ->
     %% Check that when the pool is full, checkouts return 'full' when the
     %% option to use non-blocking checkouts is used.
-    {ok, Pid} = new_pool(5, 5),
+    {ok, Pid} = new_pool(5, 5, lifo, Type),
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 9)],
     ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
     ?assertEqual(10, length(pool_call(Pid, get_all_workers))),
@@ -386,10 +393,10 @@ pool_full_nonblocking() ->
     ?assertEqual(10, length(pool_call(Pid, get_all_monitors))),
     ok = pool_call(Pid, stop).
 
-owner_death() ->
+owner_death(Type) ->
     %% Check that a dead owner (a process that dies with a worker checked out)
     %% causes the pool to dismiss the worker and prune the state space.
-    {ok, Pid} = new_pool(5, 5),
+    {ok, Pid} = new_pool(5, 5, lifo, Type),
     spawn(fun() ->
         poolboy:checkout(Pid),
         receive after 500 -> exit(normal) end
@@ -400,8 +407,8 @@ owner_death() ->
     ?assertEqual(0, length(pool_call(Pid, get_all_monitors))),
     ok = pool_call(Pid, stop).
 
-checkin_after_exception_in_transaction() ->
-    {ok, Pool} = new_pool(2, 0),
+checkin_after_exception_in_transaction(Type) ->
+    {ok, Pool} = new_pool(2, 0, lifo, Type),
     ?assertEqual(2, length(pool_call(Pool, get_avail_workers))),
     Tx = fun(Worker) ->
         ?assert(is_pid(Worker)),
@@ -417,8 +424,8 @@ checkin_after_exception_in_transaction() ->
     ?assertEqual(2, length(pool_call(Pool, get_avail_workers))),
     ok = pool_call(Pool, stop).
 
-pool_returns_status() ->
-    {ok, Pool} = new_pool(2, 0),
+pool_returns_status(Type) ->
+    {ok, Pool} = new_pool(2, 0, lifo, Type),
     ?assertEqual({ready, 2, 0, 0}, poolboy:status(Pool)),
     poolboy:checkout(Pool),
     ?assertEqual({ready, 1, 0, 1}, poolboy:status(Pool)),
@@ -446,8 +453,8 @@ pool_returns_status() ->
     ?assertEqual({full, 0, 0, 0}, poolboy:status(Pool4)),
     ok = pool_call(Pool4, stop).
 
-demonitors_previously_waiting_processes() ->
-    {ok, Pool} = new_pool(1,0),
+demonitors_previously_waiting_processes(Type) ->
+    {ok, Pool} = new_pool(1,0, lifo, Type),
     Self = self(),
     Pid = spawn(fun() ->
         W = poolboy:checkout(Pool),
@@ -465,8 +472,8 @@ demonitors_previously_waiting_processes() ->
     Pid ! ok,
     ok = pool_call(Pool, stop).
 
-demonitors_when_checkout_cancelled() ->
-    {ok, Pool} = new_pool(1,0),
+demonitors_when_checkout_cancelled(Type) ->
+    {ok, Pool} = new_pool(1,0, lifo, Type),
     Self = self(),
     Pid = spawn(fun() ->
         poolboy:checkout(Pool),
@@ -481,23 +488,23 @@ demonitors_when_checkout_cancelled() ->
     Pid ! ok,
     ok = pool_call(Pool, stop).
 
-default_strategy_lifo() ->
+default_strategy_lifo(Type) ->
     %% Default strategy is LIFO
-    {ok, Pid} = new_pool(2, 0),
+    {ok, Pid} = new_pool(2, 0, default, Type),
     Worker1 = poolboy:checkout(Pid),
     ok = poolboy:checkin(Pid, Worker1),
     Worker1 = poolboy:checkout(Pid),
     poolboy:stop(Pid).
 
-lifo_strategy() ->
-    {ok, Pid} = new_pool(2, 0, lifo),
+lifo_strategy(Type) ->
+    {ok, Pid} = new_pool(2, 0, lifo, Type),
     Worker1 = poolboy:checkout(Pid),
     ok = poolboy:checkin(Pid, Worker1),
     Worker1 = poolboy:checkout(Pid),
     poolboy:stop(Pid).
 
-fifo_strategy() ->
-    {ok, Pid} = new_pool(2, 0, fifo),
+fifo_strategy(Type) ->
+    {ok, Pid} = new_pool(2, 0, fifo, Type),
     Worker1 = poolboy:checkout(Pid),
     ok = poolboy:checkin(Pid, Worker1),
     Worker2 = poolboy:checkout(Pid),
@@ -505,8 +512,8 @@ fifo_strategy() ->
     Worker1 = poolboy:checkout(Pid),
     poolboy:stop(Pid).
 
-reuses_waiting_monitor_on_worker_exit() ->
-    {ok, Pool} = new_pool(1,0),
+reuses_waiting_monitor_on_worker_exit(Type) ->
+    {ok, Pool} = new_pool(1,0, lifo, Type),
 
     Self = self(),
     Pid = spawn(fun() ->
@@ -540,11 +547,21 @@ new_pool(Size, MaxOverflow) ->
                         {worker_module, poolboy_test_worker},
                         {size, Size}, {max_overflow, MaxOverflow}]).
 
-new_pool(Size, MaxOverflow, Strategy) ->
+new_pool(Size, MaxOverflow, default, Type) ->
     poolboy:start_link([{name, {local, poolboy_test}},
                         {worker_module, poolboy_test_worker},
-                        {size, Size}, {max_overflow, MaxOverflow},
+                        {size, Size}, {max_overflow, MaxOverflow}, {type, Type}]);
+
+new_pool(Size, MaxOverflow, Strategy, Type) ->
+    poolboy:start_link([{name, {local, poolboy_test}},
+                        {worker_module, poolboy_test_worker},
+                        {size, Size}, {max_overflow, MaxOverflow}, {type, Type},
                         {strategy, Strategy}]).
 
+pool_call(ServerRef, stop) when is_pid(ServerRef) ->
+    case is_process_alive(ServerRef) of
+        true -> gen_server:stop(ServerRef);
+        _ -> ok
+    end;
 pool_call(ServerRef, Request) ->
     gen_server:call(ServerRef, Request).
