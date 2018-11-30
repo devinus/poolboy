@@ -17,7 +17,7 @@ pool_test_() ->
         [ {Type,
            fun(T, _) ->
                    {<<(atom_to_binary(T, latin1))/binary, <<": ">>/binary, Title/binary>>, fun() -> Test(T) end}
-           end} || Type <- [list, array, tuple], {Title, Test} <-
+           end} || Type <- [list, array, tuple, queue], {Title, Test} <-
         [
             {<<"Basic pool operations">>,
                 fun pool_startup/1

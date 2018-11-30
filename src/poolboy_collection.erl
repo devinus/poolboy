@@ -50,7 +50,7 @@
             is => fun queue:is_queue/1,
             len => fun queue:len/1,
             from => fun queue:from_list/1,
-            nth => fun(I, {RL, FL})
+            nth => fun(I, {_RL, FL})
                          when I =< length(FL) ->
                            lists:nth(I, FL);
                       (I, {RL, FL}) ->
@@ -66,11 +66,11 @@
             len => fun tuple_size/1,
             from => fun list_to_tuple/1,
             nth => fun element/2,
-            prep => fun(I, T) ->  erlang:insert_element(1, T, I) end,
-            app => fun(I, T) -> erlang:append_element(T, I) end
+            prep => fun(I, Tu) ->  erlang:insert_element(1, Tu, I) end,
+            app => fun(I, Tu) -> erlang:append_element(Tu, I) end
            }
          }).
--define(Colls(T, F), maps:get(F, maps:get(T, ?Types))).
+-define(Colls(Type, Fun), maps:get(Fun, maps:get(Type, ?Types))).
 
 
 -record(coll, {indexes :: [non_neg_integer()],
@@ -203,8 +203,8 @@ all(visible, #coll{indexes = Indexes, data = Data}) ->
 rand(known, #coll{data = Data}) ->
     case len(Data) of
         0 -> empty;
-        L -> nth(rand:uniform(1, L), Data)
+        L -> nth(rand:uniform(L), Data)
     end;
 rand(visible, #coll{indexes = []}) -> empty;
 rand(visible, #coll{indexes = Indexes, data = Data}) ->
-    nth(lists:nth(rand:uniform(1, length(Indexes)), Indexes), Data).
+    nth(lists:nth(rand:uniform(length(Indexes)), Indexes), Data).
