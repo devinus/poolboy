@@ -95,7 +95,7 @@ checkin_worker(Pid, Worker) ->
 
 transaction_timeout_without_exit() ->
     {ok, Pid} = new_pool(1, 0),
-    ?assertEqual({ready,1,0,0}, pool_call(Pid, status)),
+    ?assertEqual({ready,1,0,0,0}, pool_call(Pid, status)),
     WorkerList = pool_call(Pid, get_all_workers),
     ?assertMatch([_], WorkerList),
     spawn(poolboy, transaction, [Pid,
@@ -105,12 +105,12 @@ transaction_timeout_without_exit() ->
         0]),
     timer:sleep(100),
     ?assertEqual(WorkerList, pool_call(Pid, get_all_workers)),
-    ?assertEqual({ready,1,0,0}, pool_call(Pid, status)).
+    ?assertEqual({ready,1,0,0,0}, pool_call(Pid, status)).
 
 
 transaction_timeout() ->
     {ok, Pid} = new_pool(1, 0),
-    ?assertEqual({ready,1,0,0}, pool_call(Pid, status)),
+    ?assertEqual({ready,1,0,0,0}, pool_call(Pid, status)),
     WorkerList = pool_call(Pid, get_all_workers),
     ?assertMatch([_], WorkerList),
     ?assertExit(
@@ -121,7 +121,7 @@ transaction_timeout() ->
             end,
             0)),
     ?assertEqual(WorkerList, pool_call(Pid, get_all_workers)),
-    ?assertEqual({ready,1,0,0}, pool_call(Pid, status)).
+    ?assertEqual({ready,1,0,0,0}, pool_call(Pid, status)).
 
 
 pool_startup() ->
@@ -419,31 +419,31 @@ checkin_after_exception_in_transaction() ->
 
 pool_returns_status() ->
     {ok, Pool} = new_pool(2, 0),
-    ?assertEqual({ready, 2, 0, 0}, poolboy:status(Pool)),
+    ?assertEqual({ready, 2, 0, 0, 0}, poolboy:status(Pool)),
     poolboy:checkout(Pool),
-    ?assertEqual({ready, 1, 0, 1}, poolboy:status(Pool)),
+    ?assertEqual({ready, 1, 0, 1, 0}, poolboy:status(Pool)),
     poolboy:checkout(Pool),
-    ?assertEqual({full, 0, 0, 2}, poolboy:status(Pool)),
+    ?assertEqual({full, 0, 0, 2, 0}, poolboy:status(Pool)),
     ok = pool_call(Pool, stop),
 
     {ok, Pool2} = new_pool(1, 1),
-    ?assertEqual({ready, 1, 0, 0}, poolboy:status(Pool2)),
+    ?assertEqual({ready, 1, 0, 0, 0}, poolboy:status(Pool2)),
     poolboy:checkout(Pool2),
-    ?assertEqual({overflow, 0, 0, 1}, poolboy:status(Pool2)),
+    ?assertEqual({overflow, 0, 0, 1, 0}, poolboy:status(Pool2)),
     poolboy:checkout(Pool2),
-    ?assertEqual({full, 0, 1, 2}, poolboy:status(Pool2)),
+    ?assertEqual({full, 0, 1, 2, 0}, poolboy:status(Pool2)),
     ok = pool_call(Pool2, stop),
 
     {ok, Pool3} = new_pool(0, 2),
-    ?assertEqual({overflow, 0, 0, 0}, poolboy:status(Pool3)),
+    ?assertEqual({overflow, 0, 0, 0, 0}, poolboy:status(Pool3)),
     poolboy:checkout(Pool3),
-    ?assertEqual({overflow, 0, 1, 1}, poolboy:status(Pool3)),
+    ?assertEqual({overflow, 0, 1, 1, 0}, poolboy:status(Pool3)),
     poolboy:checkout(Pool3),
-    ?assertEqual({full, 0, 2, 2}, poolboy:status(Pool3)),
+    ?assertEqual({full, 0, 2, 2, 0}, poolboy:status(Pool3)),
     ok = pool_call(Pool3, stop),
 
     {ok, Pool4} = new_pool(0, 0),
-    ?assertEqual({full, 0, 0, 0}, poolboy:status(Pool4)),
+    ?assertEqual({full, 0, 0, 0, 0}, poolboy:status(Pool4)),
     ok = pool_call(Pool4, stop).
 
 demonitors_previously_waiting_processes() ->

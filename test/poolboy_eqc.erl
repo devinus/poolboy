@@ -129,9 +129,10 @@ invariant(S = #state{pid=Pid},_) when Pid /= undefined ->
     Workers = max(0, S#state.size - length(S#state.checked_out)),
     OverFlow = max(0, length(S#state.checked_out) - S#state.size),
     Monitors = length(S#state.checked_out),
+    Waiting = queue:len(S#state.waiting),
 
     RealStatus = gen_server:call(Pid, status),
-    case RealStatus == {State, Workers, OverFlow, Monitors} of
+    case RealStatus == {State, Workers, OverFlow, Monitors, Waiting} of
         true ->
             true;
         _ ->

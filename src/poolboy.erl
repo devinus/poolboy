@@ -203,9 +203,15 @@ handle_call({checkout, CRef, Block}, {FromPid, _} = From, State) ->
 handle_call(status, _From, State) ->
     #state{workers = Workers,
            monitors = Monitors,
-           overflow = Overflow} = State,
+           overflow = Overflow,
+           waiting = Waiting} = State,
     StateName = state_name(State),
-    {reply, {StateName, length(Workers), Overflow, ets:info(Monitors, size)}, State};
+    Status = {StateName,
+              length(Workers),
+              Overflow,
+              ets:info(Monitors, size),
+              queue:len(Waiting)},
+    {reply, Status, State};
 handle_call(get_avail_workers, _From, State) ->
     Workers = State#state.workers,
     {reply, Workers, State};
