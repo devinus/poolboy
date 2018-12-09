@@ -455,6 +455,9 @@ pool_returns_estatus() ->
     ?assertEqual({ready, 1, 0, 1, 0}, poolboy:estatus(Pool)),
     poolboy:checkout(Pool),
     ?assertEqual({full, 0, 0, 2, 0}, poolboy:estatus(Pool)),
+    spawn(fun() -> poolboy:checkout(Pool) end),
+    timer:sleep(50),
+    ?assertEqual({full, 0, 0, 2, 1}, poolboy:estatus(Pool)),
     ok = pool_call(Pool, stop),
 
     {ok, Pool2} = new_pool(1, 1),
