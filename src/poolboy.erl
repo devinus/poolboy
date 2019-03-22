@@ -51,7 +51,8 @@
 checkout(Pool) ->
     checkout(Pool, true).
 
--spec checkout(Pool :: pool(), Block :: boolean()) -> pid() | full.
+-spec checkout(Pool :: pool(), Block :: boolean())
+    -> pid() | full.
 checkout(Pool, Block) ->
     checkout(Pool, Block, ?TIMEOUT).
 
@@ -61,6 +62,10 @@ checkout(Pool, Block, Timeout) ->
     CRef = make_ref(),
     try
         gen_server:call(Pool, {checkout, CRef, Block}, Timeout)
+    of
+        {ok, Pid} -> Pid;
+        full -> full;
+        {error, Reason} -> exit(Reason)
     catch
         ?EXCEPTION(Class, Reason, Stacktrace) ->
             gen_server:cast(Pool, {cancel_waiting, CRef}),
@@ -211,11 +216,15 @@ handle_call({checkout, CRef, Block}, {FromPid, _} = From, State) ->
         {{value, Pid},  Left} ->
             MRef = erlang:monitor(process, FromPid),
             true = ets:insert(Monitors, {Pid, CRef, MRef}),
-            {reply, Pid, State#state{workers = Left}};
+            {reply, {ok, Pid}, State#state{workers = Left}};
         {empty, _Left} when MaxOverflow > 0, Overflow < MaxOverflow ->
-            {Pid, MRef} = new_worker(Sup, FromPid),
-            true = ets:insert(Monitors, {Pid, CRef, MRef}),
-            {reply, Pid, State#state{overflow = Overflow + 1}};
+            case new_worker(Sup, FromPid) of
+                {ok, Pid, MRef} ->
+                    true = ets:insert(Monitors, {Pid, CRef, MRef}),
+                    {reply, {ok, Pid}, State#state{overflow = Overflow + 1}};
+                {error, _} = E ->
+                    {reply, E, State} 
+            end;
         {empty, _Left} when Block =:= false ->
             {reply, full, State};
         {empty, _Left} ->
@@ -270,7 +279,8 @@ handle_info({'EXIT', Pid, _Reason}, State) ->
             case queue:member(Pid, State#state.workers) of
                 true ->
                     W = filter_worker_by_pid(Pid, State#state.workers),
-                    {noreply, State#state{workers = queue:in(new_worker(Sup), W)}};
+                    {ok, NewWorker} = new_worker(Sup),
+                    {noreply, State#state{workers = queue:in(NewWorker, W)}};
                 false ->
                     {noreply, State}
             end
@@ -297,14 +307,22 @@ start_pool(StartFun, PoolArgs, WorkerArgs) ->
     end.
 
 new_worker(Sup) ->
-    {ok, Pid} = supervisor:start_child(Sup, []),
-    true = link(Pid),
-    Pid.
+    case supervisor:start_child(Sup, []) of
+        {ok, Pid} ->
+            true = link(Pid),
+            {ok, Pid};
+        {error, _} = E ->
+            E
+    end.
 
 new_worker(Sup, FromPid) ->
-    Pid = new_worker(Sup),
-    Ref = erlang:monitor(process, FromPid),
-    {Pid, Ref}.
+    case new_worker(Sup) of
+        {ok, Pid} ->
+            Ref = erlang:monitor(process, FromPid),
+            {ok, Pid, Ref};
+        {error, _} = E ->
+            E
+    end.
 
 get_worker_with_strategy(Workers, fifo) ->
     queue:out(Workers);
@@ -326,7 +344,8 @@ prepopulate(N, Sup) ->
 prepopulate(0, _Sup, Workers) ->
     Workers;
 prepopulate(N, Sup, Workers) ->
-    prepopulate(N-1, Sup, queue:in(new_worker(Sup), Workers)).
+    {ok, NewWorker} = new_worker(Sup),
+    prepopulate(N-1, Sup, queue:in(NewWorker, Workers)).
 
 handle_checkin(Pid, State) ->
     #state{supervisor = Sup,
@@ -336,7 +355,7 @@ handle_checkin(Pid, State) ->
     case queue:out(Waiting) of
         {{value, {From, CRef, MRef}}, Left} ->
             true = ets:insert(Monitors, {Pid, CRef, MRef}),
-            gen_server:reply(From, Pid),
+            gen_server:reply(From, {ok, Pid}),
             State#state{waiting = Left};
         {empty, Empty} when Overflow > 0 ->
             ok = dismiss_worker(Sup, Pid),
@@ -352,15 +371,16 @@ handle_worker_exit(Pid, State) ->
            overflow = Overflow} = State,
     case queue:out(State#state.waiting) of
         {{value, {From, CRef, MRef}}, LeftWaiting} ->
-            NewWorker = new_worker(State#state.supervisor),
+            {ok, NewWorker} = new_worker(State#state.supervisor),
             true = ets:insert(Monitors, {NewWorker, CRef, MRef}),
-            gen_server:reply(From, NewWorker),
+            gen_server:reply(From, {ok, NewWorker}),
             State#state{waiting = LeftWaiting};
         {empty, Empty} when Overflow > 0 ->
             State#state{overflow = Overflow - 1, waiting = Empty};
         {empty, Empty} ->
             W = filter_worker_by_pid(Pid, State#state.workers),
-            Workers = queue:in(new_worker(Sup), W),
+            {ok, NewWorker} = new_worker(Sup),
+            Workers = queue:in(NewWorker, W),
             State#state{workers = Workers, waiting = Empty}
     end.
 

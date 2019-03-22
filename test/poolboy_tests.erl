@@ -69,10 +69,18 @@ pool_test_() ->
             {<<"Pool reuses waiting monitor when a worker exits">>,
                 fun reuses_waiting_monitor_on_worker_exit/0
             },
+            {<<"Survive overflow worker start failure">>,
+                fun overflow_worker_start_failure/0
+            },
             {<<"Recover from timeout without exit handling">>,
-                fun transaction_timeout_without_exit/0},
+                fun transaction_timeout_without_exit/0
+            },
             {<<"Recover from transaction timeout">>,
-                fun transaction_timeout/0}
+                fun transaction_timeout/0
+            },
+            {<<"Survive worker start failure in transaction">>,
+                fun transaction_worker_start_failure/0
+            }
         ]
     }.
 
@@ -124,6 +132,16 @@ transaction_timeout() ->
     ?assertEqual({ready,1,0,0}, pool_call(Pid, status)).
 
 
+transaction_worker_start_failure() ->
+    {ok, Pid} = new_crash_pool(0, 1),
+    ?assertEqual({overflow, 0, 0, 0}, pool_call(Pid, status)),
+    ?assertExit(
+        not_starting,
+        poolboy:transaction(Pid,
+            fun(_) -> ok end)),
+    ?assertEqual({overflow, 0, 0, 0}, pool_call(Pid, status)).
+
+
 pool_startup() ->
     %% Check basic pool operation.
     {ok, Pid} = new_pool(10, 5),
@@ -161,6 +179,13 @@ pool_overflow() ->
     ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
     ?assertEqual(0, length(pool_call(Pid, get_all_monitors))),
     ok = pool_call(Pid, stop).
+
+overflow_worker_start_failure() ->
+    {ok, Pid} = new_crash_pool(0, 1),
+    ?assertEqual({overflow, 0, 0, 0}, pool_call(Pid, status)),
+    ?assertExit(not_starting, poolboy:checkout(Pid)),
+    ?assertEqual({overflow, 0, 0, 0}, pool_call(Pid, status)).
+    
 
 pool_empty() ->
     %% Checks that the the pool handles the empty condition correctly when
@@ -545,6 +570,11 @@ new_pool(Size, MaxOverflow, Strategy) ->
                         {worker_module, poolboy_test_worker},
                         {size, Size}, {max_overflow, MaxOverflow},
                         {strategy, Strategy}]).
+
+new_crash_pool(Size, MaxOverflow) ->
+    poolboy:start_link([{name, {local, poolboy_test}},
+                        {worker_module, poolboy_crash_worker},
+                        {size, Size}, {max_overflow, MaxOverflow}]).
 
 pool_call(ServerRef, Request) ->
     gen_server:call(ServerRef, Request).
