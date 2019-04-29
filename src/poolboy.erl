@@ -141,7 +141,8 @@ start_link(PoolArgs, WorkerArgs)  ->
 stop(Pool) ->
     gen_server:call(Pool, stop).
 
--spec status(Pool :: pool()) -> {atom(), integer(), integer(), integer()}.
+-spec status(Pool :: pool()) -> {atom(), AvailableWorkers :: integer(),
+                                 OverflowWorkers :: integer(), BusyWorkers :: integer()}.
 status(Pool) ->
     gen_server:call(Pool, status).
 
