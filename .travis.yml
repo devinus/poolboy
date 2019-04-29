@@ -7,4 +7,5 @@ otp_release:
   - 17.4
 sudo: false
 script:
-- ./rebar3 do compile, dialyzer
+    - wget https://s3.amazonaws.com/rebar3/rebar3 && chmod +x rebar3
+    - ./rebar3 do compile, dialyzer
