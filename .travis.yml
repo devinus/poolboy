@@ -8,4 +8,4 @@ otp_release:
 sudo: false
 script:
     - wget https://s3.amazonaws.com/rebar3/rebar3 && chmod +x rebar3
-    - ./rebar3 do compile, dialyzer
+    - ./rebar3 do compile, dialyzer, eunit
