@@ -1,4 +1,4 @@
-REBAR = $(shell command -v rebar3 || echo ./rebar3)
+REBAR ?= rebar3
 
 .PHONY: all compile test qc clean
 
