@@ -6,7 +6,7 @@
          replace/2, replace/3,
          prepend/2,
          append/2,
-         foreach/2,
+         filter/2,
          all/2,
          rand/2
         ]).
@@ -23,14 +23,19 @@
 -type coll_data() :: list()|{}|array:array()|pid_queue().
 -type coll_data(A) :: list(A)|{A}|array:array(A)|pid_queue(A).
 
--define(Types, 
+-define(Types,
         #{list => #{
             is => fun is_list/1,
             len => fun length/1,
             from => fun(L) -> L end,
             nth => fun lists:nth/2,
             prep => fun(I, L) -> [I|L] end,
-            app => fun(I, L) -> L ++ [I] end
+            app => fun(I, L) -> L ++ [I] end,
+            filter => fun lists:filter/2,
+            replace => fun(O, X, I, L) ->
+                               {L1, [O | Tl]} = lists:split(X-1, L),
+                               L1 ++ [I| Tl]
+                       end
            },
           array => #{
             is => fun array:is_array/1,
@@ -44,7 +49,21 @@
                                    array:set(0, I, array:new()),
                                    A)
                     end,
-            app => fun(I, A) -> array:set(array:size(A), I, A) end
+            app => fun(I, A) -> array:set(array:size(A), I, A) end,
+            filter => fun(Fun, A) ->
+                              array:sparse_map(
+                                fun(_, V) ->
+                                        case Fun(V) of
+                                            true -> V;
+                                            false -> array:default(A);
+                                            Else -> Else
+                                        end
+                                end, A)
+                      end,
+            replace => fun(O, X, I, A) ->
+                               O = array:get(X-1, A),
+                               array:set(X-1, I, A)
+                       end
            },
           queue => #{
             is => fun queue:is_queue/1,
@@ -59,7 +78,13 @@
                              RL)
                    end,
             prep => fun queue:in_r/2,
-            app => fun queue:in/2
+            app => fun queue:in/2,
+            filter => fun queue:filter/2,
+            replace => fun(O, X, I, Q) ->
+                               {Q1, Q2} = queue:split(X-1, Q),
+                               O = queue:get(Q2),
+                               queue:join(queue:in(I, Q1), queue:drop(Q2))
+                       end
            },
           tuple => #{
             is => fun is_tuple/1,
@@ -67,7 +92,12 @@
             from => fun list_to_tuple/1,
             nth => fun element/2,
             prep => fun(I, Tu) ->  erlang:insert_element(1, Tu, I) end,
-            app => fun(I, Tu) -> erlang:append_element(Tu, I) end
+            app => fun(I, Tu) -> erlang:append_element(Tu, I) end,
+            filter => fun(Fun, Tu) -> tuple_filter(Fun, Tu) end,
+            replace => fun(O, X, I, Tu) ->
+                               O = element(X, Tu),
+                               setelement(X, Tu, I)
+                       end
            }
          }).
 -define(Colls(Type, Fun), maps:get(Fun, maps:get(Type, ?Types))).
@@ -125,26 +155,17 @@ replace(Out, In, Coll = #coll{data = Data}) ->
     case maps:take(Out, Coll#coll.rev_indexes) of
         error -> error(enoent);
         {OutIndex, RevIndexes} ->
-            NewData = data_replace(OutIndex, Out, In, Data),
+            NewData = replace(OutIndex, Out, In, Data),
             NewItem = nth(OutIndex, NewData),
             NewRevIndexes = maps:put(NewItem, OutIndex, RevIndexes),
             {NewItem, Coll#coll{rev_indexes = NewRevIndexes, data = NewData}}
     end.
 
-data_replace(OutIndex, Out, In, Data) when not is_function(In) ->
-    data_replace(OutIndex, Out, fun(_) -> In end, Data);
-data_replace(OutIndex, Out, In, Data) when is_function(In, 1) andalso is_list(Data) ->
-    {FirstN, [Out | Tail]} = lists:split(OutIndex-1, Data),
-    FirstN ++ [In(OutIndex)| Tail];
-data_replace(OutIndex, Out, In, Data) when is_function(In, 1) andalso is_tuple(Data) ->
-    case array:is_array(Data) of
-        true ->
-            ArrIndex = OutIndex-1,
-            Out = array:get(ArrIndex, Data),
-            array:set(ArrIndex, In(OutIndex), Data);
-        false when element(OutIndex, Data) == Out ->
-            setelement(OutIndex, Data, In(OutIndex))
-    end.
+
+replace(OutIndex, Out, In, Data) when not is_function(In) ->
+    replace(OutIndex, Out, fun(_) -> In end, Data);
+replace(OutIndex, Out, In, Data)  when is_function(In, 1)  ->
+    (call(?FUNCTION_NAME, Data))(Out, OutIndex, In(OutIndex), Data).
 
 
 prepend(In, Coll = #coll{indexes = Indexes, rev_indexes = RevIndexes, data = Data}) ->
@@ -160,13 +181,14 @@ prepend(In, Coll = #coll{indexes = Indexes, rev_indexes = RevIndexes, data = Dat
 prep(In, Data) ->
     (call(?FUNCTION_NAME, Data))(In, Data).
 
+
 append(In, Coll = #coll{indexes = Indexes, rev_indexes = RevIndexes, data = Data}) ->
     case maps:get(In, RevIndexes, undefined) of
         InIndex when is_integer(InIndex) -> Coll#coll{indexes=Indexes++[InIndex]};
         undefined ->
             NewData = app(In, Data),
             NewIndex =
-            case {array:is_array(Data), len(Data)} of
+            case {(?Colls(array, is))(Data), len(Data)} of
                 {true, Len} -> Len - 1;
                 {_, Len} -> Len
             end,
@@ -178,20 +200,24 @@ append(In, Coll = #coll{indexes = Indexes, rev_indexes = RevIndexes, data = Data
 app(In, Data) ->
     (call(?FUNCTION_NAME, Data))(In, Data).
 
-foreach(Fun, #coll{data = Data}) -> data_foreach(Fun, Data).
 
-data_foreach(Fun, Data) when is_function(Fun) andalso is_list(Data) ->
-    lists:foreach(Fun, Data);
-data_foreach(Fun, Data) when is_function(Fun) andalso is_tuple(Data) ->
-    case array:is_array(Data) of
-        true -> array:sparse_map(fun(_, Value) -> Fun(Value) end, Data), ok;
-        false -> tuple_foreach(Fun, Data, erlang:tuple_size(Data))
-    end.
+filter(Fun, #coll{data = Data}) ->
+    (call(?FUNCTION_NAME, Data))(Fun, Data).
 
-tuple_foreach(_Fun, _Tuple, 0) -> ok;
-tuple_foreach(Fun, Tuple, Index) ->
-    Fun(element(Index, Tuple)),
-    tuple_foreach(Fun, Tuple, Index-1).
+
+tuple_filter(Fun, Tuple) ->
+    tuple_filter(Fun, Tuple, erlang:tuple_size(Tuple)).
+
+tuple_filter(_Fun, Tuple, 0) -> Tuple;
+tuple_filter(Fun, Tuple, Index) ->
+    Element = element(Index, Tuple),
+    NewTuple = case Fun(Element) of
+        true -> Tuple;
+        Else when Else == Element -> Tuple;
+        false -> setelement(Index, Tuple, undefined);
+        Else -> setelement(Index, Tuple, Else)
+    end,
+    tuple_filter(Fun, NewTuple, Index-1).
 
 
 all(known, #coll{rev_indexes = RevIndexes}) ->

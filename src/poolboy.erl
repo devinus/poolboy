@@ -180,7 +180,8 @@ init([{size, Size} | Rest], WorkerArgs, State) when is_integer(Size) ->
     init(Rest, WorkerArgs, State#state{size = Size});
 init([{type, Type} | Rest], WorkerArgs, State) when Type == list orelse
                                                     Type == array orelse
-                                                    Type == tuple ->
+                                                    Type == tuple orelse
+                                                    Type == queue ->
     init(Rest, WorkerArgs, State#state{type = Type});
 init([{max_overflow, MaxOverflow} | Rest], WorkerArgs, State) when is_integer(MaxOverflow) ->
     init(Rest, WorkerArgs, State#state{max_overflow = MaxOverflow});
@@ -310,7 +311,7 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(Reason, State = #state{supervisor = Sup}) ->
-    ok = poolboy_collection:foreach(fun (W) -> catch unlink(W) end, State#state.workers),
+    poolboy_collection:filter(fun (W) -> catch not unlink(W) end, State#state.workers),
     stop_supervisor(Reason, Sup),
     ok.
 
