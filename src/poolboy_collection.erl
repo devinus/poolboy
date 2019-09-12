@@ -133,7 +133,6 @@ len(Data) ->
 call(F, Data) when is_atom(F) ->
     call(F, Data, false, [none| maps:keys(?Types)]).
 
-call(_, _Data, _, []) -> throw(badarg);
 call(F, _Data, true, [T |_Types]) -> ?Colls(T, F);
 call(F, Data, false, [_ | [T |_] = Types]) ->
     call(F, Data, ?Colls(T, is), Types);
