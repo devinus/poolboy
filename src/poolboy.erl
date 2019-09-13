@@ -290,7 +290,7 @@ handle_call(status, _From, State) ->
            monitors = Monitors,
            overflow = Overflow} = State,
     StateName = state_name(State),
-    {reply, {StateName, poolboy_collection:len(visible, Workers), Overflow, ets:info(Monitors, size)}, State};
+    {reply, {StateName, poolboy_collection:length(visible, Workers), Overflow, ets:info(Monitors, size)}, State};
 handle_call(get_avail_workers, _From, State) ->
     {reply, poolboy_collection:all(visible, State#state.workers), State};
 handle_call(get_any_worker, _From, State) ->
@@ -421,7 +421,7 @@ handle_worker_exit(Pid, State) ->
 
 state_name(State = #state{overflow = Overflow}) when Overflow < 1 ->
     #state{max_overflow = MaxOverflow, workers = Workers} = State,
-    case poolboy_collection:len(visible, Workers) == 0 of
+    case poolboy_collection:length(visible, Workers) == 0 of
         true when MaxOverflow < 1 -> full;
         true -> overflow;
         false -> ready
