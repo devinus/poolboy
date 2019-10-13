@@ -279,10 +279,14 @@ handle_info({'EXIT', Pid, _Reason}, State) ->
 handle_info(_Info, State) ->
     {noreply, State}.
 
-terminate(_Reason, State) ->
+terminate(_Reason, #state{supervisor = Sup} = State) ->
     Workers = queue:to_list(State#state.workers),
     ok = lists:foreach(fun (W) -> unlink(W) end, Workers),
-    true = exit(State#state.supervisor, shutdown),
+    true = exit(Sup, shutdown),
+    receive
+        {'EXIT', Sup, _Reason} ->
+            ok
+    end,
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
