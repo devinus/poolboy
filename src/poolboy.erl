@@ -354,7 +354,11 @@ start_pool(StartFun, PoolArgs, WorkerArgs) ->
     end.
 
 new_worker(Sup) ->
-    {ok, Pid} = supervisor:start_child(Sup, []),
+    {ok, Pid} =
+    case is_atom(Sup) andalso erlang:function_exported(Sup, start_child, 0) of
+        true -> Sup:start_child();
+        false -> supervisor:start_child(Sup, [])
+    end,
     true = link(Pid),
     Pid.
 
