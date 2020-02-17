@@ -436,6 +436,8 @@ state_name(_State) ->
     overflow.
 
 stop_supervisor(_, undefined) -> ok;
+stop_supervisor(Reason, Atom) when is_atom(Atom) ->
+    stop_supervisor(Reason, whereis(Atom));
 stop_supervisor(Reason, Pid) when is_pid(Pid) ->
     case erlang:node(Pid) of
         N when N == node() -> exit(Pid, Reason);
