@@ -10,5 +10,5 @@ start_link(Mod, Args) ->
 
 init({Mod, Args}) ->
     {ok, {{simple_one_for_one, 0, 1},
-          [{Mod, {Mod, start_link, [Args]},
+          [{Mod, {Mod, start_link, Args},
             temporary, 5000, worker, [Mod]}]}}.
