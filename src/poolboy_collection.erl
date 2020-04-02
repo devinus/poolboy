@@ -112,10 +112,11 @@ replace(In, Index, Out, Data, T) -> (T#type.?FUNCTION_NAME)(In, Index, Out, Data
 new(Type, Size, Fun) when is_function(Fun, 1) ->
     CollType = maps:get(Type, ?TYPES),
     Indexes = lists:seq(1, Size),
-    RevIndexes = maps:from_list([{Fun(I), I} || I <- Indexes]),
+    Items = [Fun(I) || I <- Indexes],
+    RevIndexes = maps:from_list(lists:zip(Items, Indexes)),
     #coll{
        item_generator = Fun,
-       data = from(maps:keys(RevIndexes), CollType),
+       data = from(Items, CollType),
        type = CollType,
        indexes = Indexes,
        rev_indexes = RevIndexes
