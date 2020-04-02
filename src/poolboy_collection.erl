@@ -99,14 +99,14 @@
                      }
          }).
 
-from(Data, T) -> (T#type.?FUNCTION_NAME)(Data).
-is(Data, T) -> (T#type.?FUNCTION_NAME)(Data).
-len(Data, T) -> (T#type.?FUNCTION_NAME)(Data).
-nth(Index, Data, T) -> (T#type.?FUNCTION_NAME)(Index, Data).
-prep(In, Data, T) -> (T#type.?FUNCTION_NAME)(In, Data).
-app(In, Data, T) -> (T#type.?FUNCTION_NAME)(In, Data).
-filter(Fun, Data, T) -> (T#type.?FUNCTION_NAME)(Fun, Data).
-replace(In, Index, Out, Data, T) -> (T#type.?FUNCTION_NAME)(In, Index, Out, Data).
+from(Data, T) -> (T#type.from)(Data).
+is(Data, T) -> (T#type.is)(Data).
+len(Data, T) -> (T#type.len)(Data).
+nth(Index, Data, T) -> (T#type.nth)(Index, Data).
+prep(In, Data, T) -> (T#type.prep)(In, Data).
+app(In, Data, T) -> (T#type.app)(In, Data).
+filter(Fun, Data, T) -> (T#type.filter)(Fun, Data).
+replace(In, Index, Out, Data, T) -> (T#type.replace)(In, Index, Out, Data).
 
 
 new(Type, Size, Fun) when is_function(Fun, 1) ->
