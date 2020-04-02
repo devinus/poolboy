@@ -5,7 +5,7 @@
 
 -export([checkout/1, checkout/2, checkout/3, checkin/2, transaction/2,
          transaction/3, child_spec/2, child_spec/3, child_spec/4, start/1,
-         start/2, start_link/1, start_link/2, stop/1, status/1]).
+         start/2, start_link/1, start_link/2, stop/1, status_map/1, status/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
          code_change/3]).
 -export_type([pool/0]).
@@ -56,6 +56,15 @@
     max_overflow = 10 :: non_neg_integer(),
     strategy = lifo :: lifo | fifo
 }).
+
+-type status_key() ::
+      state | available | overflow | monitored | waiting.
+
+-type state_name() ::
+      full | overflow | ready.
+
+-type status_map() ::
+      #{status_key() := integer() | state_name()}.
 
 -spec checkout(Pool :: pool()) -> pid().
 checkout(Pool) ->
@@ -150,6 +159,10 @@ start_link(PoolArgs, WorkerArgs)  ->
 -spec stop(Pool :: pool()) -> ok.
 stop(Pool) ->
     gen_server:call(Pool, stop).
+
+-spec status_map(Pool :: pool()) -> status_map().
+status_map(Pool) ->
+    gen_server:call(Pool, status_map).
 
 -spec status(Pool :: pool()) -> {atom(), integer(), integer(), integer()}.
 status(Pool) ->
@@ -285,6 +298,16 @@ handle_call({checkout, CRef, Block}, {FromPid, _} = From, State) ->
             {noreply, State#state{waiting = Waiting}}
     end;
 
+handle_call(status_map, _From, State) ->
+    #state{workers = Workers,
+           monitors = Monitors,
+           overflow = Overflow} = State,
+    StateName = state_name(State),
+    {reply, #{state => StateName,
+              available => poolboy_collection:length(visible, Workers),
+              overflow => Overflow,
+              monitored => ets:info(Monitors, size),
+              waiting => queue:len(State#state.waiting)}, State};
 handle_call(status, _From, State) ->
     #state{workers = Workers,
            monitors = Monitors,
