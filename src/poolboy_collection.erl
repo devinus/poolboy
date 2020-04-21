@@ -106,7 +106,7 @@ nth(Index, Data, T) -> (T#type.nth)(Index, Data).
 prep(In, Data, T) -> (T#type.prep)(In, Data).
 app(In, Data, T) -> (T#type.app)(In, Data).
 filter(Fun, Data, T) -> (T#type.filter)(Fun, Data).
-replace(In, Index, Out, Data, T) -> (T#type.replace)(In, Index, Out, Data).
+replace(Out, Index, In, Data, T) -> (T#type.replace)(Out, Index, In, Data).
 
 
 new(Type, Size, Fun) when is_function(Fun, 1) ->
@@ -141,8 +141,8 @@ replace(Out, In, Coll = #coll{data = Data, type = T}) ->
     case maps:take(Out, Coll#coll.rev_indexes) of
         error -> error(enoent);
         {OutIndex, RevIndexes} ->
-            NewData = replace(Out, OutIndex, In(OutIndex), Data, T),
-            NewItem = nth(OutIndex, NewData, T),
+            NewItem = In(OutIndex),
+            NewData = replace(Out, OutIndex, NewItem, Data, T),
             NewRevIndexes = maps:put(NewItem, OutIndex, RevIndexes),
             {NewItem, Coll#coll{rev_indexes = NewRevIndexes, data = NewData}}
     end.
