@@ -48,11 +48,12 @@
 
 -record(state, {
     supervisor :: sup_ref(),
+    worker_module :: atom(),
     workers :: poolboy_collection:coll() | poolboy_collection:coll(pid()),
     waiting :: poolboy_collection:pid_queue() | poolboy_collection:pid_queue(tuple()),
     monitors :: ets:tid(),
     size = ?DEFAULT_SIZE :: non_neg_integer(),
-    overflow = 0 :: non_neg_integer(),
+    overflow :: poolboy_collection:coll() | poolboy_collection:coll(pid()),
     max_overflow = 10 :: non_neg_integer(),
     strategy = lifo :: lifo | fifo
 }).
@@ -172,13 +173,18 @@ init({PoolArgs, WorkerArgs}) ->
     process_flag(trap_exit, true),
     Waiting = queue:new(),
     Monitors = ets:new(monitors, [private]),
+    WorkerModule = proplists:get_value(worker_module, PoolArgs),
     Supervisor = ensure_worker_supervisor(PoolArgs, WorkerArgs),
-    Workers = prepopulate(PoolArgs, Supervisor),
+    Workers = prepopulate(PoolArgs, Supervisor, WorkerModule),
+    Overflow = prepopulate(0, ?DEFAULT_TYPE, Supervisor, WorkerModule),
     init(PoolArgs, WorkerArgs,
          #state{supervisor = Supervisor,
+                worker_module = WorkerModule,
                 workers = Workers,
                 waiting = Waiting,
-                monitors = Monitors}).
+                monitors = Monitors,
+                overflow = Overflow
+               }).
 
 ensure_worker_supervisor(PoolArgs, WorkerArgs) ->
     case proplists:get_value(worker_supervisor, PoolArgs) of
@@ -215,25 +221,29 @@ start_supervisor(WorkerModule, WorkerArgs, Retries) ->
             exit({no_worker_supervisor, Error})
     end.
 
-prepopulate(PoolArgs, Supervisor) ->
+prepopulate(PoolArgs, Supervisor, WorkerModule) ->
     prepopulate(
       proplists:get_value(size, PoolArgs, ?DEFAULT_SIZE),
       proplists:get_value(type, PoolArgs, ?DEFAULT_TYPE),
-      Supervisor).
+      Supervisor,
+      WorkerModule).
 
-prepopulate(Size, Type, Sup)
+prepopulate(Size, Type, Sup, Mod)
   when is_integer(Size) andalso ?IS_COLLECTION_TYPE(Type) ->
-    poolboy_collection:new(Type, Size, fun(_) -> new_worker(Sup) end);
-prepopulate(Size, Type, Sup) when not is_integer(Size) ->
-    prepopulate(?DEFAULT_SIZE, Type, Sup);
-prepopulate(Size, Type, Sup) when not ?IS_COLLECTION_TYPE(Type) ->
-    prepopulate(Size, ?DEFAULT_TYPE, Sup).
+    poolboy_collection:new(Type, Size, fun(Idx) -> new_worker(Sup, Mod, Idx) end);
+prepopulate(Size, Type, Sup, Mod) when not is_integer(Size) ->
+    prepopulate(?DEFAULT_SIZE, Type, Sup, Mod);
+prepopulate(Size, Type, Sup, Mod) when not ?IS_COLLECTION_TYPE(Type) ->
+    prepopulate(Size, ?DEFAULT_TYPE, Sup, Mod).
 
 init([{size, Size} | Rest], WorkerArgs, State) when is_integer(Size) ->
     init(Rest, WorkerArgs, State#state{size = Size});
-init([{max_overflow, MaxOverflow} | Rest], WorkerArgs, State)
+init([{max_overflow, MaxOverflow} | Rest], WorkerArgs, State = #state{size = Size})
   when is_integer(MaxOverflow) ->
-    init(Rest, WorkerArgs, State#state{max_overflow = MaxOverflow});
+    Overflow = poolboy_collection:new(?DEFAULT_TYPE, MaxOverflow,
+                                      fun(Idx) -> Size + Idx end),
+    init(Rest, WorkerArgs, State#state{max_overflow = MaxOverflow,
+                                       overflow = Overflow});
 init([{strategy, Strategy} | Rest], WorkerArgs, State)
   when Strategy == lifo orelse
        Strategy == fifo ->
@@ -277,19 +287,24 @@ handle_cast(_Msg, State) ->
 
 handle_call({checkout, CRef, Block}, {FromPid, _} = From, State) ->
     #state{supervisor = Sup,
+           worker_module = Mod,
            workers = Workers,
            monitors = Monitors,
            overflow = Overflow,
            max_overflow = MaxOverflow} = State,
+    OverflowLeft = poolboy_collection:length(visible, Overflow),
     case poolboy_collection:hide_head(Workers) of
         {Pid, Left} when is_pid(Pid) ->
             MRef = erlang:monitor(process, FromPid),
             true = ets:insert(Monitors, {Pid, CRef, MRef}),
             {reply, Pid, State#state{workers = Left}};
-        empty when MaxOverflow > 0, Overflow < MaxOverflow ->
-            {Pid, MRef} = new_worker(Sup, FromPid),
+        empty when MaxOverflow > 0, OverflowLeft > 0 ->
+            MRef = erlang:monitor(process, FromPid),
+            {NextIdx, NewOverflow} = poolboy_collection:hide_head(Overflow),
+            Pid = new_worker(Sup, Mod, NextIdx),
+            {Pid, NewerOverflow} = poolboy_collection:replace(NextIdx, Pid, NewOverflow),
             true = ets:insert(Monitors, {Pid, CRef, MRef}),
-            {reply, Pid, State#state{overflow = Overflow + 1}};
+            {reply, Pid, State#state{overflow = NewerOverflow}};
         empty when Block =:= false ->
             {reply, full, State};
         empty ->
@@ -301,19 +316,27 @@ handle_call({checkout, CRef, Block}, {FromPid, _} = From, State) ->
 handle_call(status_map, _From, State) ->
     #state{workers = Workers,
            monitors = Monitors,
-           overflow = Overflow} = State,
+           overflow = Overflow,
+           max_overflow = MaxOverflow} = State,
     StateName = state_name(State),
+    OverflowLeft = poolboy_collection:length(visible, Overflow),
+    OverflowLevel = MaxOverflow - OverflowLeft,
     {reply, #{state => StateName,
               available => poolboy_collection:length(visible, Workers),
-              overflow => Overflow,
+              overflow => OverflowLevel,
               monitored => ets:info(Monitors, size),
               waiting => queue:len(State#state.waiting)}, State};
 handle_call(status, _From, State) ->
     #state{workers = Workers,
            monitors = Monitors,
-           overflow = Overflow} = State,
+           overflow = Overflow,
+           max_overflow = MaxOverflow} = State,
     StateName = state_name(State),
-    {reply, {StateName, poolboy_collection:length(visible, Workers), Overflow, ets:info(Monitors, size)}, State};
+    VisibleWorkers = poolboy_collection:length(visible, Workers),
+    OverflowLeft = poolboy_collection:length(visible, Overflow),
+    OverflowLevel = MaxOverflow - OverflowLeft,
+    MonitorSize = ets:info(Monitors, size),
+    {reply, {StateName, VisibleWorkers, OverflowLevel, MonitorSize}, State};
 handle_call(get_avail_workers, _From, State) ->
     {reply, poolboy_collection:all(visible, State#state.workers), State};
 handle_call(get_any_worker, _From, State) ->
@@ -385,19 +408,31 @@ start_pool(StartFun, PoolArgs, WorkerArgs) ->
             gen_server:StartFun(Name, ?MODULE, {PoolArgs, WorkerArgs}, [])
     end.
 
-new_worker(Sup) ->
+new_worker(Sup, Mod, Index) when is_atom(Sup) ->
+    IsStart1 = erlang:function_exported(Sup, start_child, 1),
+    IsStart0 = erlang:function_exported(Sup, start_child, 0),
     {ok, Pid} =
-    case is_atom(Sup) andalso erlang:function_exported(Sup, start_child, 0) of
-        true -> Sup:start_child();
-        false -> supervisor:start_child(Sup, [])
+    case {IsStart1, IsStart0} of
+        {true, _} -> Sup:start_child(Index);
+        {_, true} -> Sup:start_child();
+        _ -> supervisor:start_child(Sup, child_args(Sup, Mod, Index))
     end,
+    true = link(Pid),
+    Pid;
+new_worker(Sup, Mod, Index) ->
+    {ok, Pid} = supervisor:start_child(Sup, child_args(Sup, Mod, Index)),
     true = link(Pid),
     Pid.
 
-new_worker(Sup, FromPid) ->
-    Pid = new_worker(Sup),
-    Ref = erlang:monitor(process, FromPid),
-    {Pid, Ref}.
+child_args(Sup, Mod, Index) ->
+    case supervisor:get_childspec(Sup, Mod) of
+        {ok, #{start := {M,F,A}}} ->
+            case erlang:function_exported(M, F, length(A) + 1) of
+                true -> [Index];
+                _ -> []
+            end;
+        _ -> []
+    end.
 
 dismiss_worker(Sup, Pid) ->
     true = unlink(Pid),
@@ -410,53 +445,87 @@ replace_worker(Pid, State = #state{strategy = Strategy}) ->
         fifo -> State#state{workers = poolboy_collection:append(NewWorker, Workers)}
     end.
 
-handle_checkin(Pid, State = #state{strategy = Strategy}) ->
+handle_checkin(Pid, State) ->
     #state{supervisor = Sup,
            waiting = Waiting,
            monitors = Monitors,
+           size = Size,
            overflow = Overflow} = State,
     case queue:out(Waiting) of
         {{value, {From, CRef, MRef}}, Left} ->
             true = ets:insert(Monitors, {Pid, CRef, MRef}),
             gen_server:reply(From, Pid),
             State#state{waiting = Left};
-        {empty, Empty} when Overflow > 0 ->
-            ok = dismiss_worker(Sup, Pid),
-            State#state{waiting = Empty, overflow = Overflow - 1};
         {empty, Empty} ->
-            Workers = case Strategy of
-                lifo -> poolboy_collection:prepend(Pid, State#state.workers);
-                fifo -> poolboy_collection:append(Pid, State#state.workers)
-            end,
-            State#state{workers = Workers, waiting = Empty, overflow = 0}
+            try poolboy_collection:replace(Pid, fun(Idx) -> Size + Idx end, Overflow) of
+                {NewIdx, NewOverflow} ->
+                    ok = dismiss_worker(Sup, Pid),
+                    NewerOverflow = poolboy_collection:prepend(NewIdx, NewOverflow),
+                    State#state{waiting = Empty, overflow = NewerOverflow}
+            catch
+                error:enoent ->
+                    Workers =
+                    case State#state.strategy of
+                        lifo -> poolboy_collection:prepend(Pid, State#state.workers);
+                        fifo -> poolboy_collection:append(Pid, State#state.workers)
+                    end,
+                    State#state{waiting = Empty, workers = Workers}
+            end
     end.
 
 handle_worker_exit(Pid, State) ->
-    #state{monitors = Monitors,
-           overflow = Overflow} = State,
+    #state{supervisor = Sup,
+           worker_module = Mod,
+           monitors = Monitors,
+           size = Size,
+           strategy = Strategy,
+           overflow = Overflow,
+           max_overflow = MaxOverflow} = State,
+    {NewWorker, Workers} =
+    try poolboy_collection:replace(Pid, State#state.workers)
+    catch error:enoent -> {enoent, State#state.workers}
+    end,
+    OverflowLeft = poolboy_collection:length(visible, Overflow),
     case queue:out(State#state.waiting) of
-        {{value, {From, CRef, MRef}}, LeftWaiting} ->
-            NewWorker = new_worker(State#state.supervisor),
+        {{value, {From, CRef, MRef}}, LeftWaiting} when is_pid(NewWorker) ->
             true = ets:insert(Monitors, {NewWorker, CRef, MRef}),
             gen_server:reply(From, NewWorker),
-            State#state{waiting = LeftWaiting};
-        {empty, Empty} when Overflow > 0 ->
-            State#state{overflow = Overflow - 1, waiting = Empty};
-        {empty, Empty} ->
-            replace_worker(Pid, State#state{waiting = Empty})
+            State#state{waiting = LeftWaiting, workers = Workers};
+        {{value, {From, CRef, MRef}}, LeftWaiting} when MaxOverflow > OverflowLeft ->
+            try
+                NewFun = fun(Idx) -> new_worker(Sup, Mod, Size + Idx) end,
+                {NewPid, NewOverflow} = poolboy_collection:replace(Pid, NewFun, Overflow),
+                true = ets:insert(Monitors, {NewPid, CRef, MRef}),
+                gen_server:reply(From, NewPid),
+                State#state{waiting = LeftWaiting, overflow = NewOverflow}
+            catch error:enoent ->
+                State
+            end;
+        {empty, Empty} when is_pid(NewWorker), Strategy == lifo ->
+            State#state{waiting = Empty,
+                        workers = poolboy_collection:prepend(NewWorker, Workers)};
+        {empty, Empty} when is_pid(NewWorker), Strategy == fifo ->
+            State#state{waiting = Empty,
+                        workers = poolboy_collection:append(NewWorker, Workers)};
+        {empty, Empty} when MaxOverflow > 0 ->
+            {Idx, NewOverflow} = poolboy_collection:replace(Pid, Overflow),
+            NewerOverflow = poolboy_collection:prepend(Idx, NewOverflow),
+            State#state{waiting = Empty, overflow = NewerOverflow}
     end.
 
-state_name(State = #state{overflow = Overflow}) when Overflow < 1 ->
-    #state{max_overflow = MaxOverflow, workers = Workers} = State,
-    case poolboy_collection:length(visible, Workers) == 0 of
-        true when MaxOverflow < 1 -> full;
-        true -> overflow;
-        false -> ready
-    end;
-state_name(#state{overflow = MaxOverflow, max_overflow = MaxOverflow}) ->
-    full;
-state_name(_State) ->
-    overflow.
+state_name(State) ->
+    #state{workers = Workers,
+           overflow = Overflow,
+           max_overflow = MaxOverflow} = State,
+    case poolboy_collection:length(visible, Workers) of
+        0 when MaxOverflow < 1 -> full;
+        0 ->
+            case poolboy_collection:length(visible, Overflow) of
+                0 -> full;
+                _ -> overflow
+            end;
+        _ -> ready
+    end.
 
 stop_supervisor(_, undefined) -> ok;
 stop_supervisor(Reason, Atom) when is_atom(Atom) ->

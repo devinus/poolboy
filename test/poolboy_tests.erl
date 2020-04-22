@@ -147,7 +147,7 @@ pool_startup(Type) ->
 pool_overflow(Type) ->
     %% Check that the pool overflows properly.
     {ok, Pid} = new_pool(5, 5, lifo, Type),
-    Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 6)],
+    Workers = lists:reverse([poolboy:checkout(Pid) || _ <- lists:seq(0, 6)]),
     ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
     ?assertEqual(7, length(pool_call(Pid, get_all_workers))),
     [A, B, C, D, E, F, G] = Workers,
@@ -173,7 +173,7 @@ pool_empty(Type) ->
     %% Checks that the the pool handles the empty condition correctly when
     %% overflow is enabled.
     {ok, Pid} = new_pool(5, 2, lifo, Type),
-    Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 6)],
+    Workers = lists:reverse([poolboy:checkout(Pid) || _ <- lists:seq(0, 6)]),
     ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
     ?assertEqual(7, length(pool_call(Pid, get_all_workers))),
     [A, B, C, D, E, F, G] = Workers,
@@ -264,7 +264,7 @@ worker_death(Type) ->
     Worker = poolboy:checkout(Pid),
     kill_worker(Worker),
     ?assertEqual(5, length(pool_call(Pid, get_avail_workers))),
-    [A, B, C|_Workers] = [poolboy:checkout(Pid) || _ <- lists:seq(0, 6)],
+    [A, B, C|_Workers] = lists:reverse([poolboy:checkout(Pid) || _ <- lists:seq(0, 6)]),
     ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
     ?assertEqual(7, length(pool_call(Pid, get_all_workers))),
     kill_worker(A),
@@ -285,7 +285,7 @@ worker_death_while_full(Type) ->
     Worker = poolboy:checkout(Pid),
     kill_worker(Worker),
     ?assertEqual(5, length(pool_call(Pid, get_avail_workers))),
-    [A, B|_Workers] = [poolboy:checkout(Pid) || _ <- lists:seq(0, 6)],
+    [A, B|_Workers] = lists:reverse([poolboy:checkout(Pid) || _ <- lists:seq(0, 6)]),
     ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
     ?assertEqual(7, length(pool_call(Pid, get_all_workers))),
     Self = self(),
@@ -384,7 +384,7 @@ pool_full_nonblocking(Type) ->
     ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
     ?assertEqual(10, length(pool_call(Pid, get_all_workers))),
     ?assertEqual(full, poolboy:checkout(Pid, false)),
-    A = hd(Workers),
+    A = lists:last(Workers),
     checkin_worker(Pid, A),
     NewWorker = poolboy:checkout(Pid, false),
     ?assertEqual(false, is_process_alive(A)), %% Overflow workers get shutdown
@@ -560,7 +560,10 @@ new_pool(Size, MaxOverflow, Strategy, Type) ->
 
 pool_call(ServerRef, stop) when is_pid(ServerRef) ->
     case is_process_alive(ServerRef) of
-        true -> gen_server:stop(ServerRef);
+        true ->
+            try gen_server:stop(ServerRef)
+            catch exit:noproc -> ok
+            end;
         _ -> ok
     end;
 pool_call(ServerRef, Request) ->
