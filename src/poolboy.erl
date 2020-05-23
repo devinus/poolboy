@@ -12,7 +12,9 @@
 
 -define(TIMEOUT, 5000).
 -define(DEFAULT_SIZE, 5).
-
+-define(DEFAULT_TYPE, list).
+-define(DEFAULT_STRATEGY, lifo).
+-define(DEFAULT_OVERFLOW, 10).
 
 -ifdef(pre17).
 -type pid_queue() :: queue().
@@ -48,13 +50,14 @@
 
 -record(state, {
     supervisor :: sup_ref(),
+    worker_module :: atom(),
     workers :: pid_queue(),
     waiting :: pid_queue(),
     monitors :: ets:tid(),
     size = ?DEFAULT_SIZE :: non_neg_integer(),
     overflow = 0 :: non_neg_integer(),
-    max_overflow = 10 :: non_neg_integer(),
-    strategy = lifo :: lifo | fifo
+    max_overflow = ?DEFAULT_OVERFLOW :: non_neg_integer(),
+    strategy = ?DEFAULT_STRATEGY :: lifo | fifo
 }).
 
 -spec checkout(Pool :: pool()) -> pid().
@@ -157,38 +160,46 @@ status(Pool) ->
 
 init({PoolArgs, WorkerArgs}) ->
     process_flag(trap_exit, true),
+
+    WorkerModule = worker_module(PoolArgs),
+    WorkerSup = worker_supervisor(PoolArgs),
+    (undefined == WorkerModule) andalso (undefined == WorkerSup)
+    andalso error({badarg, "worker_module or worker_supervisor is required"}),
+    Supervisor = ensure_supervisor(WorkerSup, WorkerModule, WorkerArgs),
+    Size = pool_size(PoolArgs),
+    Workers = init_workers(Supervisor, WorkerModule, Size),
+
+    MaxOverflow = max_overflow(PoolArgs),
+    Overflow = init_overflow(Size, MaxOverflow),
+
     Waiting = queue:new(),
     Monitors = ets:new(monitors, [private]),
-    Supervisor = ensure_worker_supervisor(PoolArgs, WorkerArgs),
-    Size = proplists:get_value(size, PoolArgs, ?DEFAULT_SIZE),
-    Workers = prepopulate(Size, Supervisor),
-    init(PoolArgs, WorkerArgs,
-         #state{supervisor = Supervisor,
-                workers = Workers,
-                waiting = Waiting,
-                monitors = Monitors}).
+    {ok, #state{
+            supervisor = Supervisor,
+            worker_module = WorkerModule,
+            workers = Workers,
+            waiting = Waiting,
+            monitors = Monitors,
+            size = Size,
+            overflow = Overflow,
+            max_overflow = MaxOverflow,
+            strategy = strategy(PoolArgs)
+           }}.
 
-ensure_worker_supervisor(PoolArgs, WorkerArgs) ->
-    case proplists:get_value(worker_supervisor, PoolArgs) of
-        undefined ->
-            start_supervisor(
-              proplists:get_value(worker_module, PoolArgs),
-              WorkerArgs);
-        Sup = {Name, Node} when Name =/= local orelse
-                                Name =/= global ->
-            (catch erlang:monitor_node(Node, true)),
-            Sup;
-        Sup when is_pid(Sup) orelse
-                 is_atom(Sup) orelse
-                 is_tuple(Sup) ->
-            Sup
-    end.
+ensure_supervisor(undefined, WorkerModule, WorkerArgs) ->
+    start_supervisor(WorkerModule, WorkerArgs);
+ensure_supervisor(Sup = {Name, Node}, _, _) when Name =/= local orelse
+                                                 Name =/= global ->
+    (catch erlang:monitor_node(Node, true)),
+    Sup;
+ensure_supervisor(Sup, _, _) when is_pid(Sup) orelse
+                                  is_atom(Sup) orelse
+                                  is_tuple(Sup) ->
+    Sup.
 
 start_supervisor(WorkerModule, WorkerArgs) ->
     start_supervisor(WorkerModule, WorkerArgs, 1).
 
-start_supervisor(undefined, _WorkerArgs, _Retries) ->
-    exit({no_worker_supervisor, {worker_module, undefined}});
 start_supervisor(WorkerModule, WorkerArgs, Retries) ->
     case poolboy_sup:start_link(WorkerModule, WorkerArgs) of
         {ok, NewPid} ->
@@ -203,20 +214,32 @@ start_supervisor(WorkerModule, WorkerArgs, Retries) ->
             exit({no_worker_supervisor, Error})
     end.
 
+init_workers(Sup, _Mod, Size) ->
+    prepopulate(Size, Sup).
 
-init([{size, Size} | Rest], WorkerArgs, State) when is_integer(Size) ->
-    init(Rest, WorkerArgs, State#state{size = Size});
-init([{max_overflow, MaxOverflow} | Rest], WorkerArgs, State)
-  when is_integer(MaxOverflow) ->
-    init(Rest, WorkerArgs, State#state{max_overflow = MaxOverflow});
-init([{strategy, Strategy} | Rest], WorkerArgs, State)
-  when Strategy == lifo orelse
-       Strategy == fifo ->
-    init(Rest, WorkerArgs, State#state{strategy = Strategy});
-init([_ | Rest], WorkerArgs, State) ->
-    init(Rest, WorkerArgs, State);
-init([], _WorkerArgs, State) ->
-    {ok, State}.
+init_overflow(_Size, _MaxOverflow) ->
+    0.
+
+worker_module(PoolArgs) ->
+    Is = is_atom(V = proplists:get_value(worker_module, PoolArgs)),
+    if not Is -> undefined; true -> V end.
+
+worker_supervisor(PoolArgs) ->
+    Is = is_atom(V = proplists:get_value(worker_supervisor, PoolArgs)),
+    if not Is -> undefined; true -> V end.
+
+pool_size(PoolArgs) ->
+    Is = is_integer(V = proplists:get_value(size, PoolArgs)),
+    if not Is -> ?DEFAULT_SIZE; true -> V end.
+
+max_overflow(PoolArgs) ->
+    Is = is_integer(V = proplists:get_value(max_overflow, PoolArgs)),
+    if not Is -> ?DEFAULT_OVERFLOW; true -> V end.
+
+-define(IS_STRATEGY(S), lists:member(S, [lifo, fifo])).
+strategy(PoolArgs) ->
+    Is = ?IS_STRATEGY(V = proplists:get_value(strategy, PoolArgs)),
+    if not Is -> ?DEFAULT_STRATEGY; true -> V end.
 
 handle_cast({checkin, Pid}, State = #state{monitors = Monitors}) ->
     case ets:lookup(Monitors, Pid) of
