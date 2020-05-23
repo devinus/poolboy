@@ -13,11 +13,8 @@
 -define(TIMEOUT, 5000).
 -define(DEFAULT_SIZE, 5).
 -define(DEFAULT_TYPE, list).
--define(IS_COLLECTION_TYPE(Type), (Type == list orelse
-                                   Type == array orelse
-                                   Type == tuple orelse
-                                   Type == queue)).
-
+-define(DEFAULT_STRATEGY, lifo).
+-define(DEFAULT_OVERFLOW, 10).
 
 
 -ifdef(OTP_RELEASE). %% this implies 21 or higher
@@ -56,8 +53,8 @@
     crefs :: ets:tid(),
     size = ?DEFAULT_SIZE :: non_neg_integer(),
     overflow :: poolboy_collection:coll() | poolboy_collection:coll(pid()),
-    max_overflow = 10 :: non_neg_integer(),
-    strategy = lifo :: lifo | fifo
+    max_overflow = ?DEFAULT_OVERFLOW :: non_neg_integer(),
+    strategy = ?DEFAULT_STRATEGY :: lifo | fifo
 }).
 
 -type status_key() ::
@@ -173,46 +170,51 @@ status(Pool) ->
 
 init({PoolArgs, WorkerArgs}) ->
     process_flag(trap_exit, true),
+
+    WorkerModule = worker_module(PoolArgs),
+    WorkerSup = worker_supervisor(PoolArgs),
+    (undefined == WorkerModule) andalso (undefined == WorkerSup)
+    andalso error({badarg, "worker_module or worker_supervisor is required"}),
+    Supervisor = ensure_supervisor(WorkerSup, WorkerModule, WorkerArgs),
+    Size = pool_size(PoolArgs),
+    Type = pool_type(PoolArgs),
+    Workers = init_workers(Supervisor, WorkerModule, Size, Type),
+
+    MaxOverflow = max_overflow(PoolArgs),
+    Overflow = init_overflow(Size, MaxOverflow, Type),
+
     Waiting = queue:new(),
     Monitors = ets:new(monitors, [private]),
     MRefs = ets:new(mrefs, [private]),
     CRefs = ets:new(crefs, [private]),
-    WorkerModule = proplists:get_value(worker_module, PoolArgs),
-    Supervisor = ensure_worker_supervisor(PoolArgs, WorkerArgs),
-    Workers = prepopulate(PoolArgs, Supervisor, WorkerModule),
-    Overflow = prepopulate(0, ?DEFAULT_TYPE, Supervisor, WorkerModule),
-    init(PoolArgs, WorkerArgs,
-         #state{supervisor = Supervisor,
-                worker_module = WorkerModule,
-                workers = Workers,
-                waiting = Waiting,
-                monitors = Monitors,
-                mrefs = MRefs,
-                crefs = CRefs,
-                overflow = Overflow
-               }).
+    {ok, #state{
+            supervisor = Supervisor,
+            worker_module = WorkerModule,
+            workers = Workers,
+            waiting = Waiting,
+            monitors = Monitors,
+            mrefs = MRefs,
+            crefs = CRefs,
+            size = Size,
+            overflow = Overflow,
+            max_overflow = MaxOverflow,
+            strategy = strategy(PoolArgs)
+           }}.
 
-ensure_worker_supervisor(PoolArgs, WorkerArgs) ->
-    case proplists:get_value(worker_supervisor, PoolArgs) of
-        undefined ->
-            start_supervisor(
-              proplists:get_value(worker_module, PoolArgs),
-              WorkerArgs);
-        Sup = {Name, Node} when Name =/= local orelse
-                                Name =/= global ->
-            (catch erlang:monitor_node(Node, true)),
-            Sup;
-        Sup when is_pid(Sup) orelse
-                 is_atom(Sup) orelse
-                 is_tuple(Sup) ->
-            Sup
-    end.
+ensure_supervisor(undefined, WorkerModule, WorkerArgs) ->
+    start_supervisor(WorkerModule, WorkerArgs);
+ensure_supervisor(Sup = {Name, Node}, _, _) when Name =/= local orelse
+                                                 Name =/= global ->
+    (catch erlang:monitor_node(Node, true)),
+    Sup;
+ensure_supervisor(Sup, _, _) when is_pid(Sup) orelse
+                                  is_atom(Sup) orelse
+                                  is_tuple(Sup) ->
+    Sup.
 
 start_supervisor(WorkerModule, WorkerArgs) ->
     start_supervisor(WorkerModule, WorkerArgs, 1).
 
-start_supervisor(undefined, _WorkerArgs, _Retries) ->
-    exit({no_worker_supervisor, {worker_module, undefined}});
 start_supervisor(WorkerModule, WorkerArgs, Retries) ->
     case poolboy_sup:start_link(WorkerModule, WorkerArgs) of
         {ok, NewPid} ->
@@ -227,37 +229,39 @@ start_supervisor(WorkerModule, WorkerArgs, Retries) ->
             exit({no_worker_supervisor, Error})
     end.
 
-prepopulate(PoolArgs, Supervisor, WorkerModule) ->
-    prepopulate(
-      proplists:get_value(size, PoolArgs, ?DEFAULT_SIZE),
-      proplists:get_value(type, PoolArgs, ?DEFAULT_TYPE),
-      Supervisor,
-      WorkerModule).
+init_workers(Sup, Mod, Size, Type) ->
+    Fun = fun(Idx) -> new_worker(Sup, Mod, Idx) end,
+    poolboy_collection:new(Type, Size, Fun).
 
-prepopulate(Size, Type, Sup, Mod)
-  when is_integer(Size) andalso ?IS_COLLECTION_TYPE(Type) ->
-    poolboy_collection:new(Type, Size, fun(Idx) -> new_worker(Sup, Mod, Idx) end);
-prepopulate(Size, Type, Sup, Mod) when not is_integer(Size) ->
-    prepopulate(?DEFAULT_SIZE, Type, Sup, Mod);
-prepopulate(Size, Type, Sup, Mod) when not ?IS_COLLECTION_TYPE(Type) ->
-    prepopulate(Size, ?DEFAULT_TYPE, Sup, Mod).
+init_overflow(Size, MaxOverflow, Type) ->
+    Fun = fun(Idx) -> Size + Idx end,
+    poolboy_collection:new(Type, MaxOverflow, Fun).
 
-init([{size, Size} | Rest], WorkerArgs, State) when is_integer(Size) ->
-    init(Rest, WorkerArgs, State#state{size = Size});
-init([{max_overflow, MaxOverflow} | Rest], WorkerArgs, State = #state{size = Size})
-  when is_integer(MaxOverflow) ->
-    Overflow = poolboy_collection:new(?DEFAULT_TYPE, MaxOverflow,
-                                      fun(Idx) -> Size + Idx end),
-    init(Rest, WorkerArgs, State#state{max_overflow = MaxOverflow,
-                                       overflow = Overflow});
-init([{strategy, Strategy} | Rest], WorkerArgs, State)
-  when Strategy == lifo orelse
-       Strategy == fifo ->
-    init(Rest, WorkerArgs, State#state{strategy = Strategy});
-init([_ | Rest], WorkerArgs, State) ->
-    init(Rest, WorkerArgs, State);
-init([], _WorkerArgs, State) ->
-    {ok, State}.
+worker_module(PoolArgs) ->
+    Is = is_atom(V = proplists:get_value(worker_module, PoolArgs)),
+    if not Is -> undefined; true -> V end.
+
+worker_supervisor(PoolArgs) ->
+    Is = is_atom(V = proplists:get_value(worker_supervisor, PoolArgs)),
+    if not Is -> undefined; true -> V end.
+
+pool_size(PoolArgs) ->
+    Is = is_integer(V = proplists:get_value(size, PoolArgs)),
+    if not Is -> ?DEFAULT_SIZE; true -> V end.
+
+-define(IS_COLLECTION_TYPE(T), lists:member(T, [list,array,tuple,queue])).
+pool_type(PoolArgs) ->
+    Is = ?IS_COLLECTION_TYPE(V = proplists:get_value(type, PoolArgs)),
+    if not Is -> ?DEFAULT_TYPE; true -> V end.
+
+max_overflow(PoolArgs) ->
+    Is = is_integer(V = proplists:get_value(max_overflow, PoolArgs)),
+    if not Is -> ?DEFAULT_OVERFLOW; true -> V end.
+
+-define(IS_STRATEGY(S), lists:member(S, [lifo, fifo])).
+strategy(PoolArgs) ->
+    Is = ?IS_STRATEGY(V = proplists:get_value(strategy, PoolArgs)),
+    if not Is -> ?DEFAULT_STRATEGY; true -> V end.
 
 handle_cast({checkin, Pid}, State) ->
     #state{monitors = Monitors, mrefs = MRefs, crefs = CRefs} = State,
