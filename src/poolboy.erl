@@ -12,7 +12,7 @@
 
 -define(TIMEOUT, 5000).
 -define(DEFAULT_SIZE, 5).
--define(DEFAULT_TYPE, list).
+-define(DEFAULT_TYPE, tuple).
 -define(DEFAULT_STRATEGY, lifo).
 -define(DEFAULT_OVERFLOW, 10).
 
