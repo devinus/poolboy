@@ -464,20 +464,13 @@ dismiss_worker(Sup, Pid) ->
     true = unlink(Pid),
     supervisor:terminate_child(Sup, Pid).
 
-replace_worker(Pid, State = #state{strategy = Strategy}) ->
-    {NewWorker, Workers} = poolboy_collection:replace(Pid, State#state.workers),
-    case Strategy of
-        lifo -> State#state{workers = poolboy_collection:prepend(NewWorker, Workers)};
-        fifo -> State#state{workers = poolboy_collection:append(NewWorker, Workers)}
-    end.
-
 handle_checkin(Pid, State) ->
     #state{supervisor = Sup,
            waiting = Waiting,
            monitors = Monitors,
            mrefs = MRefs,
            crefs = CRefs,
-           size = Size,
+           strategy = Strategy,
            overflow = Overflow} = State,
     case queue:out(Waiting) of
         {{value, {From, CRef, MRef}}, Left} ->
@@ -490,15 +483,11 @@ handle_checkin(Pid, State) ->
             try poolboy_collection:replace(Pid, Overflow) of
                 {NewIdx, NewOverflow} ->
                     ok = dismiss_worker(Sup, Pid),
-                    NewerOverflow = poolboy_collection:prepend(NewIdx, NewOverflow),
+                    NewerOverflow = poolboy_collection:Strategy(NewIdx, NewOverflow),
                     State#state{waiting = Empty, overflow = NewerOverflow}
             catch
                 error:enoent ->
-                    Workers =
-                    case State#state.strategy of
-                        lifo -> poolboy_collection:prepend(Pid, State#state.workers);
-                        fifo -> poolboy_collection:append(Pid, State#state.workers)
-                    end,
+                    Workers = poolboy_collection:Strategy(Pid, State#state.workers),
                     State#state{waiting = Empty, workers = Workers}
             end
     end.
@@ -537,12 +526,9 @@ handle_worker_exit(Pid, State) ->
             catch error:enoent ->
                 State
             end;
-        {empty, Empty} when is_pid(NewWorker), Strategy == lifo ->
+        {empty, Empty} when is_pid(NewWorker) ->
             State#state{waiting = Empty,
-                        workers = poolboy_collection:prepend(NewWorker, Workers)};
-        {empty, Empty} when is_pid(NewWorker), Strategy == fifo ->
-            State#state{waiting = Empty,
-                        workers = poolboy_collection:append(NewWorker, Workers)};
+                        workers = poolboy_collection:Strategy(NewWorker, Workers)};
         {empty, Empty} when MaxOverflow > 0 ->
             {Idx, NewOverflow} = poolboy_collection:replace(Pid, Overflow),
             NewerOverflow = poolboy_collection:prepend(Idx, NewOverflow),

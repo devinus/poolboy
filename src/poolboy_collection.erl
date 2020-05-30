@@ -4,8 +4,8 @@
          length/2,
          hide_head/1,
          replace/2, replace/3,
-         prepend/2,
-         append/2,
+         lifo/2, prepend/2,
+         fifo/2, append/2,
          filter/2,
          all/2,
          rand/2
@@ -147,6 +147,7 @@ replace(Out, In, Coll = #coll{data = Data, type = T}) ->
             {NewItem, Coll#coll{rev_indexes = NewRevIndexes, data = NewData}}
     end.
 
+lifo(In, Coll) -> prepend(In, Coll).
 
 prepend(In, Coll = #coll{indexes = Indexes, rev_indexes = RevIndexes, data = Data, type = T}) ->
     case maps:get(In, RevIndexes, undefined) of
@@ -159,6 +160,7 @@ prepend(In, Coll = #coll{indexes = Indexes, rev_indexes = RevIndexes, data = Dat
     end.
 
 
+fifo(In, Coll) -> append(In, Coll).
 
 append(In, Coll = #coll{indexes = Indexes, rev_indexes = RevIndexes, data = Data, type = T}) ->
     case maps:get(In, RevIndexes, undefined) of
