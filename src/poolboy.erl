@@ -35,16 +35,8 @@
 % Copied from gen:start_ret/0
 -type start_ret() :: {'ok', pid()} | 'ignore' | {'error', term()}.
 
-% Copied from supervisor:sup_ref/0
--type sup_ref() ::
-    (Name :: atom()) |
-    {Name :: atom(), Node :: node()} |
-    {global, Name :: atom()} |
-    {via, Module :: module(), Name :: any()} |
-    pid().
-
 -record(state, {
-    supervisor :: sup_ref(),
+    supervisor :: pid(),
     worker_module :: atom(),
     workers :: poolboy_collection:coll() | poolboy_collection:coll(pid()),
     waiting :: poolboy_collection:pid_queue() | poolboy_collection:pid_queue(tuple()),
@@ -172,10 +164,14 @@ init({PoolArgs, WorkerArgs}) ->
     process_flag(trap_exit, true),
 
     WorkerModule = worker_module(PoolArgs),
-    WorkerSup = worker_supervisor(PoolArgs),
-    (undefined == WorkerModule) andalso (undefined == WorkerSup)
-    andalso error({badarg, "worker_module or worker_supervisor is required"}),
-    Supervisor = ensure_supervisor(WorkerSup, WorkerModule, WorkerArgs),
+    Supervisor =
+    case worker_supervisor(PoolArgs) of
+        undefined ->
+            start_supervisor(WorkerModule, WorkerArgs);
+        Sup when is_pid(Sup) ->
+            true = link(Sup),
+            Sup
+    end,
     Size = pool_size(PoolArgs),
     Type = pool_type(PoolArgs),
     Workers = init_workers(Supervisor, WorkerModule, Size, Type),
@@ -201,17 +197,8 @@ init({PoolArgs, WorkerArgs}) ->
             strategy = strategy(PoolArgs)
            }}.
 
-ensure_supervisor(undefined, WorkerModule, WorkerArgs) ->
-    start_supervisor(WorkerModule, WorkerArgs);
-ensure_supervisor(Sup = {Name, Node}, _, _) when Name =/= local orelse
-                                                 Name =/= global ->
-    (catch erlang:monitor_node(Node, true)),
-    Sup;
-ensure_supervisor(Sup, _, _) when is_pid(Sup) orelse
-                                  is_atom(Sup) orelse
-                                  is_tuple(Sup) ->
-    Sup.
-
+start_supervisor(undefined, _WorkerArgs) ->
+    error({badarg, "worker_module or worker_supervisor is required"});
 start_supervisor(WorkerModule, WorkerArgs) ->
     start_supervisor(WorkerModule, WorkerArgs, 1).
 
@@ -242,8 +229,22 @@ worker_module(PoolArgs) ->
     if not Is -> undefined; true -> V end.
 
 worker_supervisor(PoolArgs) ->
-    Is = is_atom(V = proplists:get_value(worker_supervisor, PoolArgs)),
-    if not Is -> undefined; true -> V end.
+    Is = is_pid(Res = find_pid(V = proplists:get_value(worker_supervisor, PoolArgs))),
+    if not Is andalso Res =/= V -> exit({not_found, V, Res}); true -> Res end.
+
+find_pid(undefined) ->
+    undefined;
+find_pid(Name) when is_atom(Name) ->
+    find_pid({local, Name});
+find_pid({local, Name}) ->
+    whereis(Name);
+find_pid({global, Name}) ->
+    find_pid({via, global, Name});
+find_pid({via, Registry, Name}) ->
+    Registry:whereis_name(Name);
+find_pid({Name, Node}) ->
+    (catch erlang:monitor_node(Node, true)),
+    rpc:call(Node, erlang, whereis, [Name], ?TIMEOUT).
 
 pool_size(PoolArgs) ->
     Is = is_integer(V = proplists:get_value(size, PoolArgs)),
@@ -379,34 +380,26 @@ handle_info({'DOWN', MRef, _, _, _}, State) ->
             Waiting = queue:filter(fun ({_, _, R}) -> R =/= MRef end, State#state.waiting),
             {noreply, State#state{waiting = Waiting}}
     end;
-handle_info({'EXIT', Pid, Reason}, State) ->
-    #state{supervisor = Sup,
-           monitors = Monitors,
+handle_info({'EXIT', Pid, Reason}, State = #state{supervisor = Pid}) ->
+    {stop, Reason, State};
+handle_info({'EXIT', Pid, _Reason}, State) ->
+    #state{monitors = Monitors,
            mrefs = MRefs,
            crefs = CRefs} = State,
-    Next =
     case ets:lookup(Monitors, Pid) of
         [{Pid, CRef, MRef}] ->
             true = erlang:demonitor(MRef, [flush]),
             true = ets:delete(Monitors, Pid),
             true = ets:delete(MRefs, MRef),
-            true = ets:delete(CRefs, CRef),
-            NewState = handle_worker_exit(Pid, State),
-            {noreply, NewState};
+            true = ets:delete(CRefs, CRef);
         [] ->
-            try
-                {noreply, replace_worker(Pid, State)}
-            catch ?EXCEPTION(error, enoent, _StackTrace) ->
-                {noreply, State}
-            end
+            ok
     end,
-    case {Sup, erlang:node(Pid)} of
-        {{_, Node}, Node} -> {stop, Reason, State#state{supervisor = undefined}};
-        {Pid, _} -> {stop, Reason, State#state{supervisor = undefined}};
-        _ -> Next
-    end;
-handle_info({nodedown, Node}, State = #state{supervisor = {_, Node}}) ->
-    {stop, nodedown, State#state{supervisor = undefined}};
+    NewState = handle_worker_exit(Pid, State),
+    {noreply, NewState};
+handle_info({nodedown, Node}, State = #state{supervisor = Sup})
+  when Node == erlang:node(Sup) ->
+    {stop, nodedown, State};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -426,31 +419,46 @@ start_pool(StartFun, PoolArgs, WorkerArgs) ->
             gen_server:StartFun(Name, ?MODULE, {PoolArgs, WorkerArgs}, [])
     end.
 
-new_worker(Sup, Mod, Index) when is_atom(Sup) ->
-    IsStart1 = erlang:function_exported(Sup, start_child, 1),
-    IsStart0 = erlang:function_exported(Sup, start_child, 0),
+new_worker(Sup, Mod, Index)  ->
+    Node = erlang:node(Sup),
     {ok, Pid} =
-    case {IsStart1, IsStart0} of
-        {true, _} -> Sup:start_child(Index);
-        {_, true} -> Sup:start_child();
-        _ -> supervisor:start_child(Sup, child_args(Sup, Mod, Index))
+    case rpc:pinfo(Sup, registered_name) of
+        {registered_name, Name} ->
+            case function_exported(Node, Name, start_child, 1) of
+                true -> rpc:call(Node, Name, start_child, [Index]);
+                false ->
+                    case function_exported(Node, Name, start_child, 0) of
+                        true -> rpc:call(Node, Name, start_child, []);
+                        false ->
+                            Args = child_args(Sup, Mod, Index),
+                            supervisor:start_child(Sup, Args)
+                    end
+            end;
+        R when R == undefined; R == [] ->
+            Args = child_args(Sup, Mod, Index),
+            supervisor:start_child(Sup, Args)
     end,
-    true = link(Pid),
-    Pid;
-new_worker(Sup, Mod, Index) ->
-    {ok, Pid} = supervisor:start_child(Sup, child_args(Sup, Mod, Index)),
     true = link(Pid),
     Pid.
 
 child_args(Sup, Mod, Index) ->
+    Node = erlang:node(Sup),
     case supervisor:get_childspec(Sup, Mod) of
         {ok, #{start := {M,F,A}}} ->
-            case erlang:function_exported(M, F, length(A) + 1) of
+            case function_exported(Node, M, F, length(A) + 1) of
                 true -> [Index];
-                _ -> []
+                false -> []
+            end;
+        {ok, {_Id, {M,F,A}, _R, _SD, _T, _M}} ->
+            case function_exported(Node, M, F, length(A) + 1) of
+                true -> [Index];
+                false -> []
             end;
         _ -> []
     end.
+
+function_exported(Node, Module, Name, Arity) ->
+    rpc:call(Node, erlang, function_exported, [Module, Name, Arity]).
 
 dismiss_worker(Sup, Pid) ->
     true = unlink(Pid),
@@ -479,7 +487,7 @@ handle_checkin(Pid, State) ->
             gen_server:reply(From, Pid),
             State#state{waiting = Left};
         {empty, Empty} ->
-            try poolboy_collection:replace(Pid, fun(Idx) -> Size + Idx end, Overflow) of
+            try poolboy_collection:replace(Pid, Overflow) of
                 {NewIdx, NewOverflow} ->
                     ok = dismiss_worker(Sup, Pid),
                     NewerOverflow = poolboy_collection:prepend(NewIdx, NewOverflow),
@@ -555,15 +563,11 @@ state_name(State) ->
         _ -> ready
     end.
 
-stop_supervisor(_, undefined) -> ok;
-stop_supervisor(Reason, Atom) when is_atom(Atom) ->
-    stop_supervisor(Reason, whereis(Atom));
 stop_supervisor(Reason, Pid) when is_pid(Pid) ->
     case erlang:node(Pid) of
-        N when N == node() -> exit(Pid, Reason);
-        _ when Reason =/= nodedown -> catch gen_server:stop(Pid, Reason, ?TIMEOUT);
+        N when N == node() ->
+            exit(Pid, Reason);
+        _ when Reason =/= nodedown ->
+            catch gen_server:stop(Pid, Reason, ?TIMEOUT);
         _ -> ok
-    end;
-stop_supervisor(nodedown, Tuple) when is_tuple(Tuple) -> ok;
-stop_supervisor(Reason, Tuple) when is_tuple(Tuple) ->
-    catch gen_server:stop(Tuple, Reason, ?TIMEOUT).
+    end.
