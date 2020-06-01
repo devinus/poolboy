@@ -169,7 +169,7 @@ init({PoolArgs, WorkerArgs}) ->
         undefined ->
             start_supervisor(WorkerModule, WorkerArgs);
         Sup when is_pid(Sup) ->
-            true = link(Sup),
+            monitor(process, Sup),
             Sup
     end,
     Size = pool_size(PoolArgs),
@@ -372,6 +372,8 @@ handle_call(_Msg, _From, State) ->
     Reply = {error, invalid_message},
     {reply, Reply, State}.
 
+handle_info({'DOWN', _, process, Pid, Reason}, State = #state{supervisor = Pid}) ->
+    {stop, Reason, State};
 handle_info({'DOWN', MRef, _, _, _}, State) ->
     case ets:lookup(State#state.mrefs, MRef) of
         [{MRef, Pid}] ->
