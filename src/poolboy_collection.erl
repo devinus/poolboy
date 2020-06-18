@@ -1,15 +1,6 @@
 -module(poolboy_collection).
 
--export([new/3,
-         length/2,
-         hide_head/1,
-         replace/2, replace/3,
-         lifo/2, prepend/2,
-         fifo/2, append/2,
-         filter/2,
-         all/2,
-         rand/2
-        ]).
+-export([from/2, out/1, len/1, nth/2, prep/2, app/2, filter/2, replace/4, to/1]).
 
 -ifdef(pre17).
 -type pid_queue() :: queue().
@@ -29,6 +20,7 @@
          }).
 -type typed_data() :: #typed_data{data :: coll_data()}.
 -type typed_data(A) :: #typed_data{data :: coll_data(A)}.
+-export_type([typed_data/0, typed_data/1]).
 
 -record(type, {
           out :: fun((coll_data() | coll_data(any())) -> {{'value', any()}, coll_data(any())} | {'empty', coll_data()}),
@@ -40,26 +32,6 @@
           replace :: fun((A, non_neg_integer(), A, coll_data(A)) -> coll_data(A)),
           to :: fun((coll_data() | coll_data(any())) -> [any()])
          }).
-
--record(coll, {
-          item_generator :: fun((non_neg_integer()) -> any()),
-          data :: typed_data() | typed_data(any()),
-          indexes :: typed_data() | typed_data(any()),
-          rev_indexes :: #{any()=>non_neg_integer()}
-          }).
-
--type coll() :: #coll{
-                   data :: typed_data(),
-                   rev_indexes :: #{}
-                  }.
--type coll(A) :: #coll{
-                    item_generator :: fun((non_neg_integer()) -> A),
-                    data :: typed_data(A),
-                    rev_indexes :: #{A=>non_neg_integer()}
-                    }.
-
--export_type([coll/0, coll/1]).
-
 
 -define(TYPES(T),
         case T of
@@ -139,103 +111,12 @@ prep(In, TD = #typed_data{type = T, data = Data}) ->
     TD#typed_data{data = (?TYPES(T)#type.prep)(In, Data)}.
 app(In, TD = #typed_data{type = T, data = Data}) ->
     TD#typed_data{data = (?TYPES(T)#type.app)(In, Data)}.
-filter(Fun, #coll{data = Data}) -> filter(Fun, Data);
 filter(Fun, TD = #typed_data{type = T, data = Data}) ->
     TD#typed_data{data = (?TYPES(T)#type.filter)(Fun, Data)}.
 replace(Out, Index, In, TD = #typed_data{type = T, data = Data}) ->
     TD#typed_data{data = (?TYPES(T)#type.replace)(Out, Index, In, Data)}.
 to(#typed_data{type = T, data = Data}) ->
     (?TYPES(T)#type.to)(Data).
-
-
-new(Type, Size, Fun) when is_function(Fun, 1) ->
-    Indexes = lists:seq(1, Size),
-    Items = [Fun(I) || I <- Indexes],
-    RevIndexes = maps:from_list(lists:zip(Items, Indexes)),
-    #coll{
-       item_generator = Fun,
-       data = from(Items, Type),
-       indexes = from(Indexes, queue),
-       rev_indexes = RevIndexes
-      }.
-
-
-length(known, #coll{data=Data}) -> len(Data);
-length(visible, #coll{indexes=Indexes}) -> len(Indexes).
-
-
-hide_head(Coll = #coll{indexes = Indexes, data=Data}) ->
-    case out(Indexes) of
-        {empty, _} -> empty;
-        {{value, Hd}, Tl} ->
-            {nth(Hd, Data), Coll#coll{indexes = Tl}}
-    end.
-
-
-
-replace(Out, Coll = #coll{item_generator = In}) ->
-    replace(Out, In, Coll).
-
-replace(Out, In, Coll) when not is_function(In, 1) ->
-    replace(Out, fun(_) -> In end, Coll);
-replace(Out, In, Coll = #coll{data = Data}) ->
-    case maps:take(Out, Coll#coll.rev_indexes) of
-        error -> error(enoent);
-        {OutIndex, RevIndexes} ->
-            NewItem = In(OutIndex),
-            NewData = replace(Out, OutIndex, NewItem, Data),
-            NewRevIndexes = maps:put(NewItem, OutIndex, RevIndexes),
-            {NewItem, Coll#coll{rev_indexes = NewRevIndexes, data = NewData}}
-    end.
-
-lifo(In, Coll) -> prepend(In, Coll).
-
-prepend(In, Coll = #coll{indexes = Indexes, rev_indexes = RevIndexes, data = Data}) ->
-    case maps:get(In, RevIndexes, undefined) of
-        InIndex when is_integer(InIndex) -> Coll#coll{indexes = prep(InIndex, Indexes)};
-        undefined ->
-            NewData = prep(In, Data),
-            NewRevIndexes = maps:put(In, 1, maps:map(fun(_, V) -> V + 1 end, RevIndexes)),
-            NewIndexes = prep(1, filter(fun(I) -> [I + 1] end, Indexes)),
-            Coll#coll{indexes = NewIndexes, rev_indexes = NewRevIndexes, data = NewData}
-    end.
-
-
-fifo(In, Coll) -> append(In, Coll).
-
-append(In, Coll = #coll{indexes = Indexes, rev_indexes = RevIndexes, data = Data}) ->
-    case maps:get(In, RevIndexes, undefined) of
-        InIndex when is_integer(InIndex) -> Coll#coll{indexes = app(InIndex, Indexes)};
-        undefined ->
-            NewData = app(In, Data),
-            InIndex =
-            case {Data#typed_data.type, len(Data)} of
-                {array, Len} -> Len - 1;
-                {_, Len} -> Len
-            end,
-            NewRevIndexes = maps:put(In, InIndex, RevIndexes),
-            NewIndexes = app(InIndex, Indexes),
-            Coll#coll{indexes = NewIndexes, rev_indexes = NewRevIndexes, data = NewData}
-    end.
-
-
-all(known, #coll{rev_indexes = RevIndexes}) ->
-    maps:keys(RevIndexes);
-all(visible, #coll{indexes = Indexes, data = Data}) ->
-    to(filter(fun(I) -> [nth(I, Data)] end, Indexes)).
-
-
-rand(known, #coll{data = Data}) ->
-    case len(Data) of
-        0 -> empty;
-        L -> nth(rand:uniform(L), Data)
-    end;
-rand(visible, #coll{indexes = Indexes, data = Data}) ->
-    case len(Indexes) of
-        0 -> empty;
-        L -> nth(nth(rand:uniform(L), Indexes), Data)
-    end.
-
 
 
 

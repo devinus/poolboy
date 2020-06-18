@@ -38,13 +38,13 @@
 -record(state, {
     supervisor :: pid(),
     worker_module :: atom(),
-    workers :: poolboy_collection:coll() | poolboy_collection:coll(pid()),
+    workers :: poolboy_worker_collection:coll() | poolboy_worker_collection:coll(pid()),
     waiting :: poolboy_collection:pid_queue() | poolboy_collection:pid_queue(tuple()),
     monitors :: ets:tid(),
     mrefs :: ets:tid(),
     crefs :: ets:tid(),
     size = ?DEFAULT_SIZE :: non_neg_integer(),
-    overflow :: poolboy_collection:coll() | poolboy_collection:coll(pid()),
+    overflow :: poolboy_worker_collection:coll() | poolboy_worker_collection:coll(pid()),
     max_overflow = ?DEFAULT_OVERFLOW :: non_neg_integer(),
     strategy = ?DEFAULT_STRATEGY :: lifo | fifo
 }).
@@ -218,11 +218,11 @@ start_supervisor(WorkerModule, WorkerArgs, Retries) ->
 
 init_workers(Sup, Mod, Size, Type) ->
     Fun = fun(Idx) -> new_worker(Sup, Mod, Idx) end,
-    poolboy_collection:new(Type, Size, Fun).
+    poolboy_worker_collection:new(Type, Size, Fun).
 
 init_overflow(Size, MaxOverflow, Type) ->
     Fun = fun(Idx) -> Size + Idx end,
-    poolboy_collection:new(Type, MaxOverflow, Fun).
+    poolboy_worker_collection:new(Type, MaxOverflow, Fun).
 
 worker_module(PoolArgs) ->
     Is = is_atom(V = proplists:get_value(worker_module, PoolArgs)),
@@ -305,8 +305,8 @@ handle_call({checkout, CRef, Block}, {FromPid, _} = From, State) ->
            crefs = CRefs,
            overflow = Overflow,
            max_overflow = MaxOverflow} = State,
-    OverflowLeft = poolboy_collection:length(visible, Overflow),
-    case poolboy_collection:hide_head(Workers) of
+    OverflowLeft = poolboy_worker_collection:length(visible, Overflow),
+    case poolboy_worker_collection:hide_head(Workers) of
         {Pid, Left} when is_pid(Pid) ->
             MRef = erlang:monitor(process, FromPid),
             true = ets:insert(Monitors, {Pid, CRef, MRef}),
@@ -314,9 +314,9 @@ handle_call({checkout, CRef, Block}, {FromPid, _} = From, State) ->
             true = ets:insert(CRefs, {CRef, Pid}),
             {reply, Pid, State#state{workers = Left}};
         empty when MaxOverflow > 0, OverflowLeft > 0 ->
-            {NextIdx, NewOverflow} = poolboy_collection:hide_head(Overflow),
+            {NextIdx, NewOverflow} = poolboy_worker_collection:hide_head(Overflow),
             Pid = new_worker(Sup, Mod, NextIdx),
-            {Pid, NewerOverflow} = poolboy_collection:replace(NextIdx, Pid, NewOverflow),
+            {Pid, NewerOverflow} = poolboy_worker_collection:replace(NextIdx, Pid, NewOverflow),
             MRef = erlang:monitor(process, FromPid),
             true = ets:insert(Monitors, {Pid, CRef, MRef}),
             true = ets:insert(MRefs, {MRef, Pid}),
@@ -336,10 +336,10 @@ handle_call(status_map, _From, State) ->
            overflow = Overflow,
            max_overflow = MaxOverflow} = State,
     StateName = state_name(State),
-    OverflowLeft = poolboy_collection:length(visible, Overflow),
+    OverflowLeft = poolboy_worker_collection:length(visible, Overflow),
     OverflowLevel = MaxOverflow - OverflowLeft,
     {reply, #{state => StateName,
-              available => poolboy_collection:length(visible, Workers),
+              available => poolboy_worker_collection:length(visible, Workers),
               overflow => OverflowLevel,
               monitored => ets:info(Monitors, size),
               waiting => queue:len(State#state.waiting)}, State};
@@ -349,15 +349,15 @@ handle_call(status, _From, State) ->
            overflow = Overflow,
            max_overflow = MaxOverflow} = State,
     StateName = state_name(State),
-    VisibleWorkers = poolboy_collection:length(visible, Workers),
-    OverflowLeft = poolboy_collection:length(visible, Overflow),
+    VisibleWorkers = poolboy_worker_collection:length(visible, Workers),
+    OverflowLeft = poolboy_worker_collection:length(visible, Overflow),
     OverflowLevel = MaxOverflow - OverflowLeft,
     MonitorSize = ets:info(Monitors, size),
     {reply, {StateName, VisibleWorkers, OverflowLevel, MonitorSize}, State};
 handle_call(get_avail_workers, _From, State) ->
-    {reply, poolboy_collection:all(visible, State#state.workers), State};
+    {reply, poolboy_worker_collection:all(visible, State#state.workers), State};
 handle_call(get_any_worker, _From, State) ->
-    {reply, poolboy_collection:rand(known, State#state.workers), State};
+    {reply, poolboy_worker_collection:rand(known, State#state.workers), State};
 handle_call(get_all_workers, _From, State) ->
     Sup = State#state.supervisor,
     WorkerList = supervisor:which_children(Sup),
@@ -406,7 +406,7 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(Reason, State = #state{supervisor = Sup}) ->
-    poolboy_collection:filter(fun (W) -> catch not unlink(W) end, State#state.workers),
+    poolboy_worker_collection:filter(fun (W) -> catch not unlink(W) end, State#state.workers),
     stop_supervisor(Reason, Sup),
     ok.
 
@@ -482,14 +482,14 @@ handle_checkin(Pid, State) ->
             gen_server:reply(From, Pid),
             State#state{waiting = Left};
         {empty, Empty} ->
-            try poolboy_collection:replace(Pid, Overflow) of
+            try poolboy_worker_collection:replace(Pid, Overflow) of
                 {NewIdx, NewOverflow} ->
                     ok = dismiss_worker(Sup, Pid),
-                    NewerOverflow = poolboy_collection:Strategy(NewIdx, NewOverflow),
+                    NewerOverflow = poolboy_worker_collection:Strategy(NewIdx, NewOverflow),
                     State#state{waiting = Empty, overflow = NewerOverflow}
             catch
                 error:enoent ->
-                    Workers = poolboy_collection:Strategy(Pid, State#state.workers),
+                    Workers = poolboy_worker_collection:Strategy(Pid, State#state.workers),
                     State#state{waiting = Empty, workers = Workers}
             end
     end.
@@ -505,10 +505,10 @@ handle_worker_exit(Pid, State) ->
            overflow = Overflow,
            max_overflow = MaxOverflow} = State,
     {NewWorker, Workers} =
-    try poolboy_collection:replace(Pid, State#state.workers)
+    try poolboy_worker_collection:replace(Pid, State#state.workers)
     catch error:enoent -> {enoent, State#state.workers}
     end,
-    OverflowLeft = poolboy_collection:length(visible, Overflow),
+    OverflowLeft = poolboy_worker_collection:length(visible, Overflow),
     case queue:out(State#state.waiting) of
         {{value, {From, CRef, MRef}}, LeftWaiting} when is_pid(NewWorker) ->
             true = ets:insert(Monitors, {NewWorker, CRef, MRef}),
@@ -519,7 +519,7 @@ handle_worker_exit(Pid, State) ->
         {{value, {From, CRef, MRef}}, LeftWaiting} when MaxOverflow > OverflowLeft ->
             try
                 NewFun = fun(Idx) -> new_worker(Sup, Mod, Size + Idx) end,
-                {NewPid, NewOverflow} = poolboy_collection:replace(Pid, NewFun, Overflow),
+                {NewPid, NewOverflow} = poolboy_worker_collection:replace(Pid, NewFun, Overflow),
                 true = ets:insert(Monitors, {NewPid, CRef, MRef}),
                 true = ets:insert(MRefs, {MRef, Pid}),
                 true = ets:insert(CRefs, {CRef, Pid}),
@@ -530,10 +530,10 @@ handle_worker_exit(Pid, State) ->
             end;
         {empty, Empty} when is_pid(NewWorker) ->
             State#state{waiting = Empty,
-                        workers = poolboy_collection:Strategy(NewWorker, Workers)};
+                        workers = poolboy_worker_collection:Strategy(NewWorker, Workers)};
         {empty, Empty} when MaxOverflow > 0 ->
-            {Idx, NewOverflow} = poolboy_collection:replace(Pid, Overflow),
-            NewerOverflow = poolboy_collection:prepend(Idx, NewOverflow),
+            {Idx, NewOverflow} = poolboy_worker_collection:replace(Pid, Overflow),
+            NewerOverflow = poolboy_worker_collection:prepend(Idx, NewOverflow),
             State#state{waiting = Empty, overflow = NewerOverflow}
     end.
 
@@ -541,10 +541,10 @@ state_name(State) ->
     #state{workers = Workers,
            overflow = Overflow,
            max_overflow = MaxOverflow} = State,
-    case poolboy_collection:length(visible, Workers) of
+    case poolboy_worker_collection:length(visible, Workers) of
         0 when MaxOverflow < 1 -> full;
         0 ->
-            case poolboy_collection:length(visible, Overflow) of
+            case poolboy_worker_collection:length(visible, Overflow) of
                 0 -> full;
                 _ -> overflow
             end;
