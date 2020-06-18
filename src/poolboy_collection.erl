@@ -31,18 +31,20 @@
 -type typed_data(A) :: #typed_data{data :: coll_data(A)}.
 
 -record(type, {
+          out :: fun((coll_data() | coll_data(any())) -> {{'value', any()}, coll_data(any())} | {'empty', coll_data()}),
           len :: fun((coll_data() | coll_data(any())) -> non_neg_integer()),
           nth :: fun((non_neg_integer(), coll_data(A)) -> A),
           prep :: fun((A, coll_data(A)) -> coll_data(A)),
           app :: fun((A, coll_data(A)) -> coll_data(A)),
           filter :: fun((fun((A) -> boolean()), coll_data(A)) -> coll_data(A)),
-          replace :: fun((A, non_neg_integer(), A, coll_data(A)) -> coll_data(A))
+          replace :: fun((A, non_neg_integer(), A, coll_data(A)) -> coll_data(A)),
+          to :: fun((coll_data() | coll_data(any())) -> [any()])
          }).
 
 -record(coll, {
           item_generator :: fun((non_neg_integer()) -> any()),
           data :: typed_data() | typed_data(any()),
-          indexes :: [non_neg_integer()],
+          indexes :: typed_data() | typed_data(any()),
           rev_indexes :: #{any()=>non_neg_integer()}
           }).
 
@@ -62,36 +64,57 @@
 -define(TYPES(T),
         case T of
           list -> #type{
-                     len = fun length/1,
-                     nth = fun lists:nth/2,
-                     prep = fun(I, L) -> [I|L] end,
-                     app = fun(I, L) -> L ++ [I] end,
-                     filter = fun lists:filter/2,
-                     replace = fun list_replace/4
-                    };
+                      out = fun([] = L) -> {empty, L};
+                               ([Hd|Tl]) -> {{value, Hd}, Tl} end,
+                      len = fun length/1,
+                      nth = fun lists:nth/2,
+                      prep = fun(I, L) -> [I|L] end,
+                      app = fun(I, L) -> L ++ [I] end,
+                      filter = fun lists:filter/2,
+                      replace = fun list_replace/4,
+                      to = fun(L) -> L end
+                     };
           array -> #type{
+                      out = fun(A) ->
+                                case array:size(A) of
+                                    0 -> {empty, A};
+                                    _ -> {{value, array:get(0, A)},
+                                          array:reset(0, A)}
+                                end
+                            end,
                       len = fun array:size/1,
                       nth = fun(I, A) -> array:get(I-1, A) end,
                       prep = fun array_prep/2,
                       app = fun(I, A) -> array:set(array:size(A), I, A) end,
                       filter = fun array_filter/2,
-                      replace = fun array_replace/4
+                      replace = fun array_replace/4,
+                      to = fun array:to_list/1
                      };
           queue -> #type{
+                      out = fun queue:out/1,
                       len = fun queue:len/1,
                       nth = fun queue_nth/2,
                       prep = fun queue:in_r/2,
                       app = fun queue:in/2,
                       filter = fun queue:filter/2,
-                      replace = fun queue_replace/4
+                      replace = fun queue_replace/4,
+                      to = fun queue:to_list/1
                      };
           tuple -> #type{
+                      out = fun(Tu) ->
+                                case erlang:tuple_size(Tu) of
+                                    0 -> {empty, Tu};
+                                    _ -> {{value, element(1, Tu)},
+                                            erlang:delete_element(1, Tu)}
+                                end
+                            end,
                       len = fun tuple_size/1,
                       nth = fun element/2,
                       prep = fun(I, Tu) ->  erlang:insert_element(1, Tu, I) end,
                       app = fun(I, Tu) -> erlang:append_element(Tu, I) end,
                       filter = fun tuple_filter/2,
-                      replace = fun tuple_replace/4
+                      replace = fun tuple_replace/4,
+                      to = fun erlang:tuple_to_list/1
                      }
         end).
 
@@ -105,6 +128,9 @@ from(List, T) when T == tuple ->
     #typed_data{type = T, data = list_to_tuple(List)}.
 
 
+out(TD = #typed_data{type = T, data = Data}) ->
+    {V, D} = (?TYPES(T)#type.out)(Data),
+    {V, TD#typed_data{data = D}}.
 len(#typed_data{type = T, data = Data}) ->
     (?TYPES(T)#type.len)(Data).
 nth(Index, #typed_data{type = T, data = Data}) ->
@@ -118,6 +144,8 @@ filter(Fun, TD = #typed_data{type = T, data = Data}) ->
     TD#typed_data{data = (?TYPES(T)#type.filter)(Fun, Data)}.
 replace(Out, Index, In, TD = #typed_data{type = T, data = Data}) ->
     TD#typed_data{data = (?TYPES(T)#type.replace)(Out, Index, In, Data)}.
+to(#typed_data{type = T, data = Data}) ->
+    (?TYPES(T)#type.to)(Data).
 
 
 new(Type, Size, Fun) when is_function(Fun, 1) ->
@@ -127,18 +155,22 @@ new(Type, Size, Fun) when is_function(Fun, 1) ->
     #coll{
        item_generator = Fun,
        data = from(Items, Type),
-       indexes = Indexes,
+       indexes = from(Indexes, queue),
        rev_indexes = RevIndexes
       }.
 
 
 length(known, #coll{data=Data}) -> len(Data);
-length(visible, #coll{indexes=Indexes}) -> length(Indexes).
+length(visible, #coll{indexes=Indexes}) -> len(Indexes).
 
 
-hide_head(#coll{indexes = []}) -> empty;
-hide_head(Coll = #coll{indexes = [Hd|Tl], data=Data}) ->
-    {nth(Hd, Data), Coll#coll{indexes = Tl}}.
+hide_head(Coll = #coll{indexes = Indexes, data=Data}) ->
+    case out(Indexes) of
+        {empty, _} -> empty;
+        {{value, Hd}, Tl} ->
+            {nth(Hd, Data), Coll#coll{indexes = Tl}}
+    end.
+
 
 
 replace(Out, Coll = #coll{item_generator = In}) ->
@@ -160,11 +192,11 @@ lifo(In, Coll) -> prepend(In, Coll).
 
 prepend(In, Coll = #coll{indexes = Indexes, rev_indexes = RevIndexes, data = Data}) ->
     case maps:get(In, RevIndexes, undefined) of
-        InIndex when is_integer(InIndex) -> Coll#coll{indexes=[InIndex|Indexes]};
+        InIndex when is_integer(InIndex) -> Coll#coll{indexes = prep(InIndex, Indexes)};
         undefined ->
             NewData = prep(In, Data),
             NewRevIndexes = maps:put(In, 1, maps:map(fun(_, V) -> V + 1 end, RevIndexes)),
-            NewIndexes = [1 | [I+1 || I <- Indexes]],
+            NewIndexes = prep(1, filter(fun(I) -> [I + 1] end, Indexes)),
             Coll#coll{indexes = NewIndexes, rev_indexes = NewRevIndexes, data = NewData}
     end.
 
@@ -173,16 +205,16 @@ fifo(In, Coll) -> append(In, Coll).
 
 append(In, Coll = #coll{indexes = Indexes, rev_indexes = RevIndexes, data = Data}) ->
     case maps:get(In, RevIndexes, undefined) of
-        InIndex when is_integer(InIndex) -> Coll#coll{indexes=Indexes++[InIndex]};
+        InIndex when is_integer(InIndex) -> Coll#coll{indexes = app(InIndex, Indexes)};
         undefined ->
             NewData = app(In, Data),
-            NewIndex =
+            InIndex =
             case {Data#typed_data.type, len(Data)} of
                 {array, Len} -> Len - 1;
                 {_, Len} -> Len
             end,
-            NewRevIndexes = maps:put(In, NewIndex, RevIndexes),
-            NewIndexes = Indexes++[NewIndex],
+            NewRevIndexes = maps:put(In, InIndex, RevIndexes),
+            NewIndexes = app(InIndex, Indexes),
             Coll#coll{indexes = NewIndexes, rev_indexes = NewRevIndexes, data = NewData}
     end.
 
@@ -190,7 +222,7 @@ append(In, Coll = #coll{indexes = Indexes, rev_indexes = RevIndexes, data = Data
 all(known, #coll{rev_indexes = RevIndexes}) ->
     maps:keys(RevIndexes);
 all(visible, #coll{indexes = Indexes, data = Data}) ->
-    [nth(I, Data) || I <- Indexes].
+    to(filter(fun(I) -> [nth(I, Data)] end, Indexes)).
 
 
 rand(known, #coll{data = Data}) ->
@@ -198,9 +230,11 @@ rand(known, #coll{data = Data}) ->
         0 -> empty;
         L -> nth(rand:uniform(L), Data)
     end;
-rand(visible, #coll{indexes = []}) -> empty;
 rand(visible, #coll{indexes = Indexes, data = Data}) ->
-    nth(lists:nth(rand:uniform(length(Indexes)), Indexes), Data).
+    case len(Indexes) of
+        0 -> empty;
+        L -> nth(nth(rand:uniform(L), Indexes), Data)
+    end.
 
 
 
@@ -256,7 +290,7 @@ queue_replace(O, X, I, Q) ->
 
 
 tuple_filter(Fun, Tuple) ->
-    tuple_filter(Fun, Tuple, erlang:tuple_size(Tuple)).
+    tuple_filter(Fun, Tuple, tuple_size(Tuple)).
 
 tuple_filter(_Fun, Tuple, 0) -> Tuple;
 tuple_filter(Fun, Tuple, Index) ->
