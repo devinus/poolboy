@@ -22,104 +22,111 @@
 -type typed_data(A) :: #typed_data{data :: coll_data(A)}.
 -export_type([typed_data/0, typed_data/1]).
 
--record(type, {
-          out :: fun((coll_data() | coll_data(any())) -> {{'value', any()}, coll_data(any())} | {'empty', coll_data()}),
-          len :: fun((coll_data() | coll_data(any())) -> non_neg_integer()),
-          nth :: fun((non_neg_integer(), coll_data(A)) -> A),
-          prep :: fun((A, coll_data(A)) -> coll_data(A)),
-          app :: fun((A, coll_data(A)) -> coll_data(A)),
-          filter :: fun((fun((A) -> boolean()), coll_data(A)) -> coll_data(A)),
-          replace :: fun((A, non_neg_integer(), A, coll_data(A)) -> coll_data(A)),
-          to :: fun((coll_data() | coll_data(any())) -> [any()])
-         }).
 
--define(TYPES(T),
-        case T of
-          list -> #type{
-                      out = fun([] = L) -> {empty, L};
-                               ([Hd|Tl]) -> {{value, Hd}, Tl} end,
-                      len = fun length/1,
-                      nth = fun lists:nth/2,
-                      prep = fun(I, L) -> [I|L] end,
-                      app = fun(I, L) -> L ++ [I] end,
-                      filter = fun lists:filter/2,
-                      replace = fun list_replace/4,
-                      to = fun(L) -> L end
-                     };
-          array -> #type{
-                      out = fun(A) ->
-                                case array:size(A) of
-                                    0 -> {empty, A};
-                                    _ -> {{value, array:get(0, A)},
-                                          array:reset(0, A)}
-                                end
-                            end,
-                      len = fun array:size/1,
-                      nth = fun(I, A) -> array:get(I-1, A) end,
-                      prep = fun array_prep/2,
-                      app = fun(I, A) -> array:set(array:size(A), I, A) end,
-                      filter = fun array_filter/2,
-                      replace = fun array_replace/4,
-                      to = fun array:to_list/1
-                     };
-          queue -> #type{
-                      out = fun queue:out/1,
-                      len = fun queue:len/1,
-                      nth = fun queue_nth/2,
-                      prep = fun queue:in_r/2,
-                      app = fun queue:in/2,
-                      filter = fun queue:filter/2,
-                      replace = fun queue_replace/4,
-                      to = fun queue:to_list/1
-                     };
-          tuple -> #type{
-                      out = fun(Tu) ->
-                                case erlang:tuple_size(Tu) of
-                                    0 -> {empty, Tu};
-                                    _ -> {{value, element(1, Tu)},
-                                            erlang:delete_element(1, Tu)}
-                                end
-                            end,
-                      len = fun tuple_size/1,
-                      nth = fun element/2,
-                      prep = fun(I, Tu) ->  erlang:insert_element(1, Tu, I) end,
-                      app = fun(I, Tu) -> erlang:append_element(Tu, I) end,
-                      filter = fun tuple_filter/2,
-                      replace = fun tuple_replace/4,
-                      to = fun erlang:tuple_to_list/1
-                     }
-        end).
-
-from(List, T) when T == list ->
+from(List, T = list) ->
     #typed_data{type = T, data = List};
-from(List, T) when T == queue ->
+from(List, T = queue) ->
     #typed_data{type = T, data = queue:from_list(List)};
-from(List, T) when T == array ->
+from(List, T = array) ->
     #typed_data{type = T, data = array:from_list(List)};
-from(List, T) when T == tuple ->
+from(List, T = tuple) ->
     #typed_data{type = T, data = list_to_tuple(List)}.
 
 
-out(TD = #typed_data{type = T, data = Data}) ->
-    {V, D} = (?TYPES(T)#type.out)(Data),
-    {V, TD#typed_data{data = D}}.
-len(#typed_data{type = T, data = Data}) ->
-    (?TYPES(T)#type.len)(Data).
-nth(Index, #typed_data{type = T, data = Data}) ->
-    (?TYPES(T)#type.nth)(Index, Data).
-prep(In, TD = #typed_data{type = T, data = Data}) ->
-    TD#typed_data{data = (?TYPES(T)#type.prep)(In, Data)}.
-app(In, TD = #typed_data{type = T, data = Data}) ->
-    TD#typed_data{data = (?TYPES(T)#type.app)(In, Data)}.
-filter(Fun, TD = #typed_data{type = T, data = Data}) ->
-    TD#typed_data{data = (?TYPES(T)#type.filter)(Fun, Data)}.
-replace(Out, Index, In, TD = #typed_data{type = T, data = Data}) ->
-    TD#typed_data{data = (?TYPES(T)#type.replace)(Out, Index, In, Data)}.
-to(#typed_data{type = T, data = Data}) ->
-    (?TYPES(T)#type.to)(Data).
+out(TD = #typed_data{data = Data, type = list}) ->
+    case Data of
+        [] = L -> out(TD, {empty, L});
+        [H|T] -> out(TD, {{value, H}, T})
+    end;
+out(TD = #typed_data{data = Data, type = queue}) ->
+    out(TD, queue:out(Data));
+out(TD = #typed_data{data = Data, type = array}) ->
+    case array:sparse_size(Data) of
+        0 -> out(TD, {empty, Data});
+        _ -> out(TD, {{value, array:get(0, Data)}, array:reset(0, Data)})
+    end;
+out(TD = #typed_data{data = Data, type = tuple}) ->
+    case erlang:tuple_size(Data) of
+        0 -> out(TD, {empty, Data});
+        _ -> out(TD, {{value, element(1, Data)}, erlang:delete_element(1, Data)})
+    end.
+
+out(TD, {V, D}) -> {V, data(TD, D)}.
+
+
+len(#typed_data{data = Data, type = list}) -> length(Data);
+len(#typed_data{data = Data, type = queue}) -> queue:len(Data);
+len(#typed_data{data = Data, type = array}) -> array:sparse_size(Data);
+len(#typed_data{data = Data, type = tuple}) -> tuple_size(Data).
+
+
+nth(Index, #typed_data{data = Data, type = list}) -> lists:nth(Index, Data);
+nth(Index, #typed_data{data = Data, type = queue}) -> queue_nth(Index, Data);
+nth(Index, #typed_data{data = Data, type = array}) -> array:get(Index-1, Data);
+nth(Index, #typed_data{data = Data, type = tuple}) -> element(Index, Data).
+
+
+prep(In, TD = #typed_data{data = Data, type = list}) ->
+    data(TD, [In | Data]);
+prep(In, TD = #typed_data{data = Data, type = queue}) ->
+    data(TD, queue:cons(In, Data));
+prep(In, TD = #typed_data{data = Data, type = array}) ->
+    data(TD, array_prep(In, Data));
+prep(In, TD = #typed_data{data = Data, type = tuple}) ->
+    data(TD, erlang:insert_element(1, Data, In)).
+
+
+app(In, TD = #typed_data{data = Data, type = list}) ->
+    data(TD, Data ++ [In]);
+app(In, TD = #typed_data{data = Data, type = queue}) ->
+    data(TD, queue:in(In, Data));
+app(In, TD = #typed_data{data = Data, type = array}) ->
+    data(TD, array:set(array:size(Data), In, Data));
+app(In, TD = #typed_data{data = Data, type = tuple}) ->
+    data(TD, erlang:append_element(Data, In)).
+
+
+filter(Fun, TD = #typed_data{data = Data, type = list}) ->
+    data(TD, list_filter(Fun, Data));
+filter(Fun, TD = #typed_data{data = Data, type = queue}) ->
+    data(TD, queue:filter(Fun, Data));
+filter(Fun, TD = #typed_data{data = Data, type = array}) ->
+    data(TD, array_filter(Fun, Data));
+filter(Fun, TD = #typed_data{data = Data, type = tuple}) ->
+    data(TD, tuple_filter(Fun, Data)).
+
+
+replace(Out, Index, In, TD = #typed_data{data = Data, type = list}) ->
+    data(TD, list_replace(Out, Index, In, Data));
+replace(Out, Index, In, TD = #typed_data{data = Data, type = queue}) ->
+    data(TD, queue_replace(Out, Index, In, Data));
+replace(Out, Index, In, TD = #typed_data{data = Data, type = array}) ->
+    data(TD, array_replace(Out, Index, In, Data));
+replace(Out, Index, In, TD = #typed_data{data = Data, type = tuple}) ->
+    data(TD, tuple_replace(Out, Index, In, Data)).
+
+
+to(#typed_data{data = Data, type = list}) -> Data;
+to(#typed_data{data = Data, type = queue}) -> queue:to_list(Data);
+to(#typed_data{data = Data, type = array}) -> array:to_list(Data);
+to(#typed_data{data = Data, type = tuple}) -> tuple_to_list(Data).
+
+
+data(TD, Data) -> TD#typed_data{data = Data}.
 
 
 
+list_filter(Fun, L) ->
+    list_filter(Fun, L, []).
+
+list_filter(_Fun, [], Acc) -> lists:reverse(Acc);
+list_filter(Fun, [H | T], Acc) ->
+    case Fun(H) of
+        true -> list_filter(Fun, T, [H | Acc]);
+        false -> list_filter(Fun, T, Acc);
+        H -> list_filter(Fun, T, [H | Acc]);
+        Else -> list_filter(Fun, T, [Else | Acc])
+    end.
 
 list_replace(O, X, I, L) ->
     {L1, [O | Tl]} = lists:split(X-1, L),
@@ -179,7 +186,7 @@ tuple_filter(Fun, Tuple, Index) ->
     NewTuple = case Fun(Element) of
         true -> Tuple;
         Else when Else == Element -> Tuple;
-        false -> setelement(Index, Tuple, undefined);
+        false -> erlang:delete_element(Index, Tuple);
         Else -> setelement(Index, Tuple, Else)
     end,
     tuple_filter(Fun, NewTuple, Index-1).
