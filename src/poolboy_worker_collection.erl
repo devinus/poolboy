@@ -1,6 +1,6 @@
 -module(poolboy_worker_collection).
 
--export([new/3,
+-export([new/4,
          length/2,
          hide_head/1,
          replace/2, replace/3,
@@ -32,14 +32,16 @@
 -export_type([coll/0, coll/1]).
 
 
-new(Type, Size, Fun) when is_function(Fun, 1) ->
+new(Type, Size, lifo, Fun) -> new(Type, Size, list, Fun);
+new(Type, Size, fifo, Fun) -> new(Type, Size, queue, Fun);
+new(Type, Size, IndexesType, Fun) when is_function(Fun, 1) ->
     Indexes = lists:seq(1, Size),
     Items = [Fun(I) || I <- Indexes],
     RevIndexes = maps:from_list(lists:zip(Items, Indexes)),
     #coll{
        item_generator = Fun,
        data = poolboy_collection:from(Items, Type),
-       indexes = poolboy_collection:from(Indexes, queue),
+       indexes = poolboy_collection:from(Indexes, IndexesType),
        rev_indexes = RevIndexes
       }.
 

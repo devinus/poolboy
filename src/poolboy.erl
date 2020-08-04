@@ -174,10 +174,11 @@ init({PoolArgs, WorkerArgs}) ->
     end,
     Size = pool_size(PoolArgs),
     Type = pool_type(PoolArgs),
-    Workers = init_workers(Supervisor, WorkerModule, Size, Type),
+    Strategy = strategy(PoolArgs),
+    Workers = init_workers(Supervisor, WorkerModule, Size, Type, Strategy),
 
     MaxOverflow = max_overflow(PoolArgs),
-    Overflow = init_overflow(Size, MaxOverflow, Type),
+    Overflow = init_overflow(Size, MaxOverflow, Type, Strategy),
 
     Waiting = queue:new(),
     Monitors = ets:new(monitors, [private]),
@@ -194,7 +195,7 @@ init({PoolArgs, WorkerArgs}) ->
             size = Size,
             overflow = Overflow,
             max_overflow = MaxOverflow,
-            strategy = strategy(PoolArgs)
+            strategy = Strategy
            }}.
 
 start_supervisor(undefined, _WorkerArgs) ->
@@ -216,13 +217,13 @@ start_supervisor(WorkerModule, WorkerArgs, Retries) ->
             exit({no_worker_supervisor, Error})
     end.
 
-init_workers(Sup, Mod, Size, Type) ->
+init_workers(Sup, Mod, Size, Type, Strategy) ->
     Fun = fun(Idx) -> new_worker(Sup, Mod, Idx) end,
-    poolboy_worker_collection:new(Type, Size, Fun).
+    poolboy_worker_collection:new(Type, Size, Strategy, Fun).
 
-init_overflow(Size, MaxOverflow, Type) ->
+init_overflow(Size, MaxOverflow, Type, Strategy) ->
     Fun = fun(Idx) -> Size + Idx end,
-    poolboy_worker_collection:new(Type, MaxOverflow, Fun).
+    poolboy_worker_collection:new(Type, MaxOverflow, Strategy, Fun).
 
 worker_module(PoolArgs) ->
     Is = is_atom(V = proplists:get_value(worker_module, PoolArgs)),
