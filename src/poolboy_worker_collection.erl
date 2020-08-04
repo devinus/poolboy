@@ -2,19 +2,20 @@
 
 -export([new/4,
          length/2,
-         hide_head/1,
+         checkout/1,
          replace/2, replace/3,
-         lifo/2, prepend/2,
-         fifo/2, append/2,
+         checkin/2,
          filter/2,
          all/2,
          rand/2
         ]).
 
+-type strategy() :: lifo | fifo.
 
 -record(coll, {
           item_generator :: fun((non_neg_integer()) -> any()),
           data :: poolboy_collection:typed_data() | poolboy_collection:typed_data(any()),
+          strategy :: strategy(),
           indexes :: poolboy_collection:typed_data() | poolboy_collection:typed_data(any()),
           rev_indexes :: #{any()=>non_neg_integer()}
           }).
@@ -32,15 +33,15 @@
 -export_type([coll/0, coll/1]).
 
 
-new(Type, Size, lifo, Fun) -> new(Type, Size, list, Fun);
-new(Type, Size, fifo, Fun) -> new(Type, Size, queue, Fun);
-new(Type, Size, IndexesType, Fun) when is_function(Fun, 1) ->
+new(Type, Size, Strategy, Fun) when is_function(Fun, 1) ->
     Indexes = lists:seq(1, Size),
     Items = [Fun(I) || I <- Indexes],
     RevIndexes = maps:from_list(lists:zip(Items, Indexes)),
+    IndexesType = case Strategy of lifo -> list; fifo -> queue end,
     #coll{
        item_generator = Fun,
        data = poolboy_collection:from(Items, Type),
+       strategy = Strategy,
        indexes = poolboy_collection:from(Indexes, IndexesType),
        rev_indexes = RevIndexes
       }.
@@ -50,13 +51,12 @@ length(known, #coll{data=Data}) -> poolboy_collection:len(Data);
 length(visible, #coll{indexes=Indexes}) -> poolboy_collection:len(Indexes).
 
 
-hide_head(Coll = #coll{indexes = Indexes, data=Data}) ->
+checkout(Coll = #coll{indexes = Indexes, data=Data}) ->
     case poolboy_collection:out(Indexes) of
         {empty, _} -> empty;
         {{value, Hd}, Tl} ->
             {poolboy_collection:nth(Hd, Data), Coll#coll{indexes = Tl}}
     end.
-
 
 
 replace(Out, Coll = #coll{item_generator = In}) ->
@@ -74,23 +74,20 @@ replace(Out, In, Coll = #coll{data = Data}) ->
             {NewItem, Coll#coll{rev_indexes = NewRevIndexes, data = NewData}}
     end.
 
-lifo(In, Coll) -> prepend(In, Coll).
 
-prepend(In, Coll = #coll{indexes = Indexes, rev_indexes = RevIndexes, data = _Data}) ->
-    case maps:get(In, RevIndexes, undefined) of
-        InIndex when is_integer(InIndex) -> Coll#coll{indexes = poolboy_collection:prep(InIndex, Indexes)}
-    end.
+checkin(In, Coll = #coll{indexes = Indexes, rev_indexes = RevIndexes}) ->
+    InIndex = maps:get(In, RevIndexes),
+    NewIndexes =
+    case Coll#coll.strategy of
+        lifo -> poolboy_collection:prep(InIndex, Indexes);
+        fifo -> poolboy_collection:app(InIndex, Indexes)
+    end,
+    Coll#coll{indexes = NewIndexes}.
 
-
-fifo(In, Coll) -> append(In, Coll).
-
-append(In, Coll = #coll{indexes = Indexes, rev_indexes = RevIndexes, data = _Data}) ->
-    case maps:get(In, RevIndexes, undefined) of
-        InIndex when is_integer(InIndex) -> Coll#coll{indexes = poolboy_collection:app(InIndex, Indexes)}
-    end.
 
 filter(Fun, #coll{data = Data}) ->
     poolboy_collection:filter(Fun, Data).
+
 
 all(known, #coll{rev_indexes = RevIndexes}) ->
     maps:keys(RevIndexes);
