@@ -14,10 +14,14 @@ pool_test_() ->
             end,
             error_logger:tty(true)
         end,
-        [ {Type,
-           fun(T, _) ->
-                   {<<(atom_to_binary(T, latin1))/binary, <<": ">>/binary, Title/binary>>, fun() -> Test(T) end}
-           end} || Type <- [list, array, tuple, queue], {Title, Test} <-
+        [ {{Type, Strategy},
+           fun({T, S}, _) ->
+                   {<<(atom_to_binary(T, latin1))/binary, <<"-">>/binary,
+                      (atom_to_binary(S, latin1))/binary, <<": ">>/binary,
+                      Title/binary>>, fun() -> Test({T, S}) end}
+           end} || Type <- [list, array, tuple, queue, ets],
+                   Strategy <- [lifo, fifo, rand],
+                   {Title, Test} <-
         [
             {<<"Basic pool operations">>,
                 fun pool_startup/1
@@ -70,6 +74,9 @@ pool_test_() ->
             {<<"Check FIFO strategy">>,
                 fun fifo_strategy/1
             },
+            {<<"Check RAND strategy">>,
+                fun rand_strategy/1
+            },
             {<<"Pool reuses waiting monitor when a worker exits">>,
                 fun reuses_waiting_monitor_on_worker_exit/1
             },
@@ -100,8 +107,8 @@ checkin_worker(Pid, Worker) ->
     timer:sleep(500).
 
 
-transaction_timeout_without_exit(Type) ->
-    {ok, Pid} = new_pool(1, 0, lifo, Type),
+transaction_timeout_without_exit({Type, Strategy}) ->
+    {ok, Pid} = new_pool(1, 0, Strategy, Type),
     ?assertEqual({ready,1,0,0}, pool_call(Pid, status)),
     WorkerList = pool_call(Pid, get_all_workers),
     ?assertMatch([_], WorkerList),
@@ -115,8 +122,8 @@ transaction_timeout_without_exit(Type) ->
     ?assertEqual({ready,1,0,0}, pool_call(Pid, status)).
 
 
-transaction_timeout(Type) ->
-    {ok, Pid} = new_pool(1, 0, lifo, Type),
+transaction_timeout({Type, Strategy}) ->
+    {ok, Pid} = new_pool(1, 0, Strategy, Type),
     ?assertEqual({ready,1,0,0}, pool_call(Pid, status)),
     WorkerList = pool_call(Pid, get_all_workers),
     ?assertMatch([_], WorkerList),
@@ -131,9 +138,9 @@ transaction_timeout(Type) ->
     ?assertEqual({ready,1,0,0}, pool_call(Pid, status)).
 
 
-pool_startup(Type) ->
+pool_startup({Type, Strategy}) ->
     %% Check basic pool operation.
-    {ok, Pid} = new_pool(10, 5, lifo, Type),
+    {ok, Pid} = new_pool(10, 5, Strategy, Type),
     ?assertEqual(10, length(pool_call(Pid, get_avail_workers))),
     poolboy:checkout(Pid),
     ?assertEqual(9, length(pool_call(Pid, get_avail_workers))),
@@ -144,9 +151,9 @@ pool_startup(Type) ->
     ?assertEqual(1, length(pool_call(Pid, get_all_monitors))),
     ok = pool_call(Pid, stop).
 
-pool_overflow(Type) ->
+pool_overflow({Type, Strategy}) ->
     %% Check that the pool overflows properly.
-    {ok, Pid} = new_pool(5, 5, lifo, Type),
+    {ok, Pid} = new_pool(5, 5, Strategy, Type),
     Workers = lists:reverse([poolboy:checkout(Pid) || _ <- lists:seq(0, 6)]),
     ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
     ?assertEqual(7, length(pool_call(Pid, get_all_workers))),
@@ -169,10 +176,10 @@ pool_overflow(Type) ->
     ?assertEqual(0, length(pool_call(Pid, get_all_monitors))),
     ok = pool_call(Pid, stop).
 
-pool_empty(Type) ->
+pool_empty({Type, Strategy}) ->
     %% Checks that the the pool handles the empty condition correctly when
     %% overflow is enabled.
-    {ok, Pid} = new_pool(5, 2, lifo, Type),
+    {ok, Pid} = new_pool(5, 2, Strategy, Type),
     Workers = lists:reverse([poolboy:checkout(Pid) || _ <- lists:seq(0, 6)]),
     ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
     ?assertEqual(7, length(pool_call(Pid, get_all_workers))),
@@ -215,10 +222,10 @@ pool_empty(Type) ->
     ?assertEqual(0, length(pool_call(Pid, get_all_monitors))),
     ok = pool_call(Pid, stop).
 
-pool_empty_no_overflow(Type) ->
+pool_empty_no_overflow({Type, Strategy}) ->
     %% Checks the pool handles the empty condition properly when overflow is
     %% disabled.
-    {ok, Pid} = new_pool(5, 0, lifo, Type),
+    {ok, Pid} = new_pool(5, 0, Strategy, Type),
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 4)],
     ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
     ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
@@ -257,10 +264,10 @@ pool_empty_no_overflow(Type) ->
     ?assertEqual(0, length(pool_call(Pid, get_all_monitors))),
     ok = pool_call(Pid, stop).
 
-worker_death(Type) ->
+worker_death({Type, Strategy}) ->
     %% Check that dead workers are only restarted when the pool is not full
     %% and the overflow count is 0. Meaning, don't restart overflow workers.
-    {ok, Pid} = new_pool(5, 2, lifo, Type),
+    {ok, Pid} = new_pool(5, 2, Strategy, Type),
     Worker = poolboy:checkout(Pid),
     kill_worker(Worker),
     ?assertEqual(5, length(pool_call(Pid, get_avail_workers))),
@@ -277,11 +284,11 @@ worker_death(Type) ->
     ?assertEqual(4, length(pool_call(Pid, get_all_monitors))),
     ok = pool_call(Pid, stop).
 
-worker_death_while_full(Type) ->
+worker_death_while_full({Type, Strategy}) ->
     %% Check that if a worker dies while the pool is full and there is a
     %% queued checkout, a new worker is started and the checkout serviced.
     %% If there are no queued checkouts, a new worker is not started.
-    {ok, Pid} = new_pool(5, 2, lifo, Type),
+    {ok, Pid} = new_pool(5, 2, Strategy, Type),
     Worker = poolboy:checkout(Pid),
     kill_worker(Worker),
     ?assertEqual(5, length(pool_call(Pid, get_avail_workers))),
@@ -318,11 +325,11 @@ worker_death_while_full(Type) ->
     ?assertEqual(6, length(pool_call(Pid, get_all_monitors))),
     ok = pool_call(Pid, stop).
 
-worker_death_while_full_no_overflow(Type) ->
+worker_death_while_full_no_overflow({Type, Strategy}) ->
     %% Check that if a worker dies while the pool is full and there's no
     %% overflow, a new worker is started unconditionally and any queued
     %% checkouts are serviced.
-    {ok, Pid} = new_pool(5, 0, lifo, Type),
+    {ok, Pid} = new_pool(5, 0, Strategy, Type),
     Worker = poolboy:checkout(Pid),
     kill_worker(Worker),
     ?assertEqual(5, length(pool_call(Pid, get_avail_workers))),
@@ -361,10 +368,10 @@ worker_death_while_full_no_overflow(Type) ->
     ?assertEqual(3, length(pool_call(Pid, get_all_monitors))),
     ok = pool_call(Pid, stop).
 
-pool_full_nonblocking_no_overflow(Type) ->
+pool_full_nonblocking_no_overflow({Type, Strategy}) ->
     %% Check that when the pool is full, checkouts return 'full' when the
     %% option to use non-blocking checkouts is used.
-    {ok, Pid} = new_pool(5, 0, lifo, Type),
+    {ok, Pid} = new_pool(5, 0, Strategy, Type),
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 4)],
     ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
     ?assertEqual(5, length(pool_call(Pid, get_all_workers))),
@@ -376,10 +383,10 @@ pool_full_nonblocking_no_overflow(Type) ->
     ?assertEqual(5, length(pool_call(Pid, get_all_monitors))),
     ok = pool_call(Pid, stop).
 
-pool_full_nonblocking(Type) ->
+pool_full_nonblocking({Type, Strategy}) ->
     %% Check that when the pool is full, checkouts return 'full' when the
     %% option to use non-blocking checkouts is used.
-    {ok, Pid} = new_pool(5, 5, lifo, Type),
+    {ok, Pid} = new_pool(5, 5, Strategy, Type),
     Workers = [poolboy:checkout(Pid) || _ <- lists:seq(0, 9)],
     ?assertEqual(0, length(pool_call(Pid, get_avail_workers))),
     ?assertEqual(10, length(pool_call(Pid, get_all_workers))),
@@ -393,10 +400,10 @@ pool_full_nonblocking(Type) ->
     ?assertEqual(10, length(pool_call(Pid, get_all_monitors))),
     ok = pool_call(Pid, stop).
 
-owner_death(Type) ->
+owner_death({Type, Strategy}) ->
     %% Check that a dead owner (a process that dies with a worker checked out)
     %% causes the pool to dismiss the worker and prune the state space.
-    {ok, Pid} = new_pool(5, 5, lifo, Type),
+    {ok, Pid} = new_pool(5, 5, Strategy, Type),
     spawn(fun() ->
         poolboy:checkout(Pid),
         receive after 500 -> exit(normal) end
@@ -407,8 +414,8 @@ owner_death(Type) ->
     ?assertEqual(0, length(pool_call(Pid, get_all_monitors))),
     ok = pool_call(Pid, stop).
 
-checkin_after_exception_in_transaction(Type) ->
-    {ok, Pool} = new_pool(2, 0, lifo, Type),
+checkin_after_exception_in_transaction({Type, Strategy}) ->
+    {ok, Pool} = new_pool(2, 0, Strategy, Type),
     ?assertEqual(2, length(pool_call(Pool, get_avail_workers))),
     Tx = fun(Worker) ->
         ?assert(is_pid(Worker)),
@@ -424,8 +431,8 @@ checkin_after_exception_in_transaction(Type) ->
     ?assertEqual(2, length(pool_call(Pool, get_avail_workers))),
     ok = pool_call(Pool, stop).
 
-pool_returns_status(Type) ->
-    {ok, Pool} = new_pool(2, 0, lifo, Type),
+pool_returns_status({Type, Strategy}) ->
+    {ok, Pool} = new_pool(2, 0, Strategy, Type),
     ?assertEqual({ready, 2, 0, 0}, poolboy:status(Pool)),
     poolboy:checkout(Pool),
     ?assertEqual({ready, 1, 0, 1}, poolboy:status(Pool)),
@@ -433,7 +440,7 @@ pool_returns_status(Type) ->
     ?assertEqual({full, 0, 0, 2}, poolboy:status(Pool)),
     ok = pool_call(Pool, stop),
 
-    {ok, Pool2} = new_pool(1, 1),
+    {ok, Pool2} = new_pool(1, 1, Strategy, Type),
     ?assertEqual({ready, 1, 0, 0}, poolboy:status(Pool2)),
     poolboy:checkout(Pool2),
     ?assertEqual({overflow, 0, 0, 1}, poolboy:status(Pool2)),
@@ -441,7 +448,7 @@ pool_returns_status(Type) ->
     ?assertEqual({full, 0, 1, 2}, poolboy:status(Pool2)),
     ok = pool_call(Pool2, stop),
 
-    {ok, Pool3} = new_pool(0, 2),
+    {ok, Pool3} = new_pool(0, 2, Strategy, Type),
     ?assertEqual({overflow, 0, 0, 0}, poolboy:status(Pool3)),
     poolboy:checkout(Pool3),
     ?assertEqual({overflow, 0, 1, 1}, poolboy:status(Pool3)),
@@ -449,12 +456,12 @@ pool_returns_status(Type) ->
     ?assertEqual({full, 0, 2, 2}, poolboy:status(Pool3)),
     ok = pool_call(Pool3, stop),
 
-    {ok, Pool4} = new_pool(0, 0),
+    {ok, Pool4} = new_pool(0, 0, Strategy, Type),
     ?assertEqual({full, 0, 0, 0}, poolboy:status(Pool4)),
     ok = pool_call(Pool4, stop).
 
-demonitors_previously_waiting_processes(Type) ->
-    {ok, Pool} = new_pool(1,0, lifo, Type),
+demonitors_previously_waiting_processes({Type, Strategy}) ->
+    {ok, Pool} = new_pool(1,0, Strategy, Type),
     Self = self(),
     Pid = spawn(fun() ->
         W = poolboy:checkout(Pool),
@@ -472,8 +479,8 @@ demonitors_previously_waiting_processes(Type) ->
     Pid ! ok,
     ok = pool_call(Pool, stop).
 
-demonitors_when_checkout_cancelled(Type) ->
-    {ok, Pool} = new_pool(1,0, lifo, Type),
+demonitors_when_checkout_cancelled({Type, Strategy}) ->
+    {ok, Pool} = new_pool(1, 0, Strategy, Type),
     Self = self(),
     Pid = spawn(fun() ->
         poolboy:checkout(Pool),
@@ -488,32 +495,61 @@ demonitors_when_checkout_cancelled(Type) ->
     Pid ! ok,
     ok = pool_call(Pool, stop).
 
-default_strategy_lifo(Type) ->
+default_strategy_lifo({Type, lifo}) ->
     %% Default strategy is LIFO
     {ok, Pid} = new_pool(2, 0, default, Type),
     Worker1 = poolboy:checkout(Pid),
     ok = poolboy:checkin(Pid, Worker1),
     Worker1 = poolboy:checkout(Pid),
-    poolboy:stop(Pid).
+    poolboy:stop(Pid);
+default_strategy_lifo({_Type, _Strategy}) ->
+    ok.
 
-lifo_strategy(Type) ->
+lifo_strategy({Type, lifo}) ->
     {ok, Pid} = new_pool(2, 0, lifo, Type),
     Worker1 = poolboy:checkout(Pid),
     ok = poolboy:checkin(Pid, Worker1),
     Worker1 = poolboy:checkout(Pid),
-    poolboy:stop(Pid).
+    poolboy:stop(Pid);
+lifo_strategy({_Type, _Strategy}) ->
+    ok.
 
-fifo_strategy(Type) ->
+fifo_strategy({Type, fifo}) ->
     {ok, Pid} = new_pool(2, 0, fifo, Type),
     Worker1 = poolboy:checkout(Pid),
     ok = poolboy:checkin(Pid, Worker1),
     Worker2 = poolboy:checkout(Pid),
     ?assert(Worker1 =/= Worker2),
     Worker1 = poolboy:checkout(Pid),
-    poolboy:stop(Pid).
+    poolboy:stop(Pid);
+fifo_strategy({_Type, _Strategy}) ->
+    ok.
 
-reuses_waiting_monitor_on_worker_exit(Type) ->
-    {ok, Pool} = new_pool(1,0, lifo, Type),
+rand_strategy({Type, rand}) ->
+    {ok, Pid} = new_pool(3, 0, rand, Type),
+    Workers1 =
+    [ begin
+          Worker = poolboy:checkout(Pid),
+          ok = poolboy:checkin(Pid, Worker),
+          Worker
+      end || _ <- lists:seq(1,5) ],
+    Workers2 =
+    [ begin
+          Worker = poolboy:checkout(Pid),
+          ok = poolboy:checkin(Pid, Worker),
+          Worker
+      end || _ <- lists:seq(1,5) ],
+    ?assertNotEqual(Workers1, Workers2),
+    Workers = [ poolboy:checkout(Pid)
+                || _ <- lists:seq(1,3) ],
+    ?assertEqual(lists:usort(Workers),
+                 lists:usort(Workers1 ++ Workers2)),
+    poolboy:stop(Pid);
+rand_strategy({_Type, _Strategy}) ->
+    ok.
+
+reuses_waiting_monitor_on_worker_exit({Type, Strategy}) ->
+    {ok, Pool} = new_pool(1,0, Strategy, Type),
 
     Self = self(),
     Pid = spawn(fun() ->

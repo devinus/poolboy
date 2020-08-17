@@ -1,6 +1,8 @@
 -module(poolboy_collection).
 
--export([from/2, out/1, len/1, nth/2, prep/2, app/2, filter/2, replace/4, to/1]).
+-include_lib("stdlib/include/ms_transform.hrl").
+
+-export([from/2, out/1, len/1, nth/2, add/2, filter/2, replace/4, to/1]).
 
 -ifdef(pre17).
 -type pid_queue() :: queue().
@@ -11,11 +13,11 @@
 -endif.
 -export_type([pid_queue/0, pid_queue/1]).
 
--type coll_data() :: list()|{}|array:array()|pid_queue().
--type coll_data(A) :: list(A)|{A}|array:array(A)|pid_queue(A).
+-type coll_data() :: list()|{}|array:array()|pid_queue()|ets:tid().
+-type coll_data(A) :: list(A)|{A}|array:array(A)|pid_queue(A)|ets:tid().
 
 -record(typed_data, {
-          type :: 'list' |'array' |'queue' |'tuple',
+          type :: 'list' |'array' |'queue' |'tuple' |'ets',
           data :: coll_data() | coll_data(any())
          }).
 -type typed_data() :: #typed_data{data :: coll_data()}.
@@ -30,7 +32,11 @@ from(List, T = queue) ->
 from(List, T = array) ->
     #typed_data{type = T, data = array:from_list(List)};
 from(List, T = tuple) ->
-    #typed_data{type = T, data = list_to_tuple(List)}.
+    #typed_data{type = T, data = list_to_tuple(List)};
+from(List, T = ets) ->
+    Tab = ets:new(table, [ordered_set]),
+    true = ets:insert_new(Tab, [{I} || I <- List]),
+    #typed_data{type = T, data = Tab}.
 
 
 out(TD = #typed_data{data = Data, type = list}) ->
@@ -49,6 +55,15 @@ out(TD = #typed_data{data = Data, type = tuple}) ->
     case erlang:tuple_size(Data) of
         0 -> out(TD, {empty, Data});
         _ -> out(TD, {{value, element(1, Data)}, erlang:delete_element(1, Data)})
+    end;
+out(TD = #typed_data{data = Data, type = ets}) ->
+    case ets:info(Data, size) of
+        0 -> {empty, TD};
+        Size ->
+            Index = rand:uniform(Size),
+            [{Value}] = ets:slot(Data, Index-1),
+            true = ets:delete(Data, Value),
+            {{value, Value}, TD}
     end.
 
 out(TD, {V, D}) -> {V, data(TD, D)}.
@@ -57,33 +72,30 @@ out(TD, {V, D}) -> {V, data(TD, D)}.
 len(#typed_data{data = Data, type = list}) -> length(Data);
 len(#typed_data{data = Data, type = queue}) -> queue:len(Data);
 len(#typed_data{data = Data, type = array}) -> array:sparse_size(Data);
-len(#typed_data{data = Data, type = tuple}) -> tuple_size(Data).
+len(#typed_data{data = Data, type = tuple}) -> tuple_size(Data);
+len(#typed_data{data = Data, type = ets}) -> ets:info(Data, size).
 
 
 nth(Index, #typed_data{data = Data, type = list}) -> lists:nth(Index, Data);
 nth(Index, #typed_data{data = Data, type = queue}) -> queue_nth(Index, Data);
 nth(Index, #typed_data{data = Data, type = array}) -> array:get(Index-1, Data);
-nth(Index, #typed_data{data = Data, type = tuple}) -> element(Index, Data).
+nth(Index, #typed_data{data = Data, type = tuple}) -> element(Index, Data);
+nth(Index, #typed_data{data = Data, type = ets}) ->
+    [{Value}] = ets:slot(Data, Index-1),
+    Value.
 
 
-prep(In, TD = #typed_data{data = Data, type = list}) ->
+add(In, TD = #typed_data{data = Data, type = list}) ->
     data(TD, [In | Data]);
-prep(In, TD = #typed_data{data = Data, type = queue}) ->
-    data(TD, queue:cons(In, Data));
-prep(In, TD = #typed_data{data = Data, type = array}) ->
-    data(TD, array_prep(In, Data));
-prep(In, TD = #typed_data{data = Data, type = tuple}) ->
-    data(TD, erlang:insert_element(1, Data, In)).
-
-
-app(In, TD = #typed_data{data = Data, type = list}) ->
-    data(TD, Data ++ [In]);
-app(In, TD = #typed_data{data = Data, type = queue}) ->
+add(In, TD = #typed_data{data = Data, type = queue}) ->
     data(TD, queue:in(In, Data));
-app(In, TD = #typed_data{data = Data, type = array}) ->
+add(In, TD = #typed_data{data = Data, type = array}) ->
     data(TD, array:set(array:size(Data), In, Data));
-app(In, TD = #typed_data{data = Data, type = tuple}) ->
-    data(TD, erlang:append_element(Data, In)).
+add(In, TD = #typed_data{data = Data, type = tuple}) ->
+    data(TD, erlang:append_element(Data, In));
+add(In, TD = #typed_data{data = Data, type = ets}) ->
+    true = ets:insert_new(Data, {In}),
+    TD.
 
 
 filter(Fun, TD = #typed_data{data = Data, type = list}) ->
@@ -93,7 +105,9 @@ filter(Fun, TD = #typed_data{data = Data, type = queue}) ->
 filter(Fun, TD = #typed_data{data = Data, type = array}) ->
     data(TD, array_filter(Fun, Data));
 filter(Fun, TD = #typed_data{data = Data, type = tuple}) ->
-    data(TD, tuple_filter(Fun, Data)).
+    data(TD, tuple_filter(Fun, Data));
+filter(Fun, TD = #typed_data{data = Data, type = ets}) ->
+    data(TD, ets_filter(Fun, Data)).
 
 
 replace(Out, Index, In, TD = #typed_data{data = Data, type = list}) ->
@@ -103,13 +117,20 @@ replace(Out, Index, In, TD = #typed_data{data = Data, type = queue}) ->
 replace(Out, Index, In, TD = #typed_data{data = Data, type = array}) ->
     data(TD, array_replace(Out, Index, In, Data));
 replace(Out, Index, In, TD = #typed_data{data = Data, type = tuple}) ->
-    data(TD, tuple_replace(Out, Index, In, Data)).
+    data(TD, tuple_replace(Out, Index, In, Data));
+replace(Out, Index, In, TD = #typed_data{data = Data, type = ets}) ->
+    [{Out}] = ets:slot(Data, Index),
+    [{Out}] = ets:take(Data, Out),
+    true = ets:insert_new(Data, {In}),
+    TD.
 
 
 to(#typed_data{data = Data, type = list}) -> Data;
 to(#typed_data{data = Data, type = queue}) -> queue:to_list(Data);
 to(#typed_data{data = Data, type = array}) -> array:to_list(Data);
-to(#typed_data{data = Data, type = tuple}) -> tuple_to_list(Data).
+to(#typed_data{data = Data, type = tuple}) -> tuple_to_list(Data);
+to(#typed_data{data = Data, type = ets}) ->
+    ets:select(Data, ets:fun2ms(fun({I}) -> I end)).
 
 
 data(TD, Data) -> TD#typed_data{data = Data}.
@@ -123,9 +144,10 @@ list_filter(_Fun, [], Acc) -> lists:reverse(Acc);
 list_filter(Fun, [H | T], Acc) ->
     case Fun(H) of
         true -> list_filter(Fun, T, [H | Acc]);
+        [Else] when Else == H -> list_filter(Fun, T, [H | Acc]);
         false -> list_filter(Fun, T, Acc);
-        H -> list_filter(Fun, T, [H | Acc]);
-        Else -> list_filter(Fun, T, [Else | Acc])
+        [] -> list_filter(Fun, T, Acc);
+        [Else] -> list_filter(Fun, T, [Else | Acc])
     end.
 
 list_replace(O, X, I, L) ->
@@ -134,22 +156,15 @@ list_replace(O, X, I, L) ->
 
 
 
-array_prep(I, A) ->
-    array:foldl(
-      fun(Idx, Val, Arr) ->
-              array:set(Idx+1, Val, Arr)
-      end,
-      array:set(0, I, array:new()),
-      A).
-
-
 array_filter(F, A) ->
     array:sparse_map(
       fun(_, V) ->
               case F(V) of
                   true -> V;
+                  [Else] when Else == V -> V;
                   false -> array:default(A);
-                  Else -> Else
+                  [] -> array:default(A);
+                  [Else] -> Else
               end
       end,
       A).
@@ -185,9 +200,10 @@ tuple_filter(Fun, Tuple, Index) ->
     Element = element(Index, Tuple),
     NewTuple = case Fun(Element) of
         true -> Tuple;
-        Else when Else == Element -> Tuple;
+        [Else] when Else == Element -> Tuple;
         false -> erlang:delete_element(Index, Tuple);
-        Else -> setelement(Index, Tuple, Else)
+        [] -> erlang:delete_element(Index, Tuple);
+        [Else] -> setelement(Index, Tuple, Else)
     end,
     tuple_filter(Fun, NewTuple, Index-1).
 
@@ -195,3 +211,23 @@ tuple_filter(Fun, Tuple, Index) ->
 tuple_replace(O, X, I, Tu) ->
     O = element(X, Tu),
     setelement(X, Tu, I).
+
+
+
+ets_filter(Fun, Tab) ->
+    {Ins, Outs} =
+    ets:foldl(
+      fun({Item}, {In, Out} = Acc) ->
+              case Fun(Item) of
+                  true -> Acc;
+                  [Else] when Else == Item -> Acc;
+                  false -> {In, [Item | Out]};
+                  [] -> {In, [Item | Out]};
+                  [Else] -> {[Else | In], [Item | Out]}
+              end
+      end,
+      {[], []},
+      Tab),
+    true = lists:min([true | [ets:delete(Tab, O) || O <- Outs]]),
+    true = ets:insert_new(Tab, Ins),
+    Tab.

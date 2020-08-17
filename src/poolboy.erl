@@ -258,7 +258,7 @@ max_overflow(PoolArgs) ->
     Is = is_integer(V = proplists:get_value(max_overflow, PoolArgs)),
     if not Is -> ?DEFAULT_OVERFLOW; true -> V end.
 
--define(IS_STRATEGY(S), lists:member(S, [lifo, fifo])).
+-define(IS_STRATEGY(S), lists:member(S, [lifo, fifo, rand])).
 strategy(PoolArgs) ->
     Is = ?IS_STRATEGY(V = proplists:get_value(strategy, PoolArgs)),
     if not Is -> ?DEFAULT_STRATEGY; true -> V end.

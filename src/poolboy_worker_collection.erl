@@ -10,7 +10,7 @@
          rand/2
         ]).
 
--type strategy() :: lifo | fifo.
+-type strategy() :: lifo | fifo | rand.
 
 -record(coll, {
           item_generator :: fun((non_neg_integer()) -> any()),
@@ -37,7 +37,12 @@ new(Type, Size, Strategy, Fun) when is_function(Fun, 1) ->
     Indexes = lists:seq(1, Size),
     Items = [Fun(I) || I <- Indexes],
     RevIndexes = maps:from_list(lists:zip(Items, Indexes)),
-    IndexesType = case Strategy of lifo -> list; fifo -> queue end,
+    IndexesType =
+    case Strategy of
+        lifo -> list;
+        fifo -> queue;
+        rand -> ets
+    end,
     #coll{
        item_generator = Fun,
        data = poolboy_collection:from(Items, Type),
@@ -77,11 +82,7 @@ replace(Out, In, Coll = #coll{data = Data}) ->
 
 checkin(In, Coll = #coll{indexes = Indexes, rev_indexes = RevIndexes}) ->
     InIndex = maps:get(In, RevIndexes),
-    NewIndexes =
-    case Coll#coll.strategy of
-        lifo -> poolboy_collection:prep(InIndex, Indexes);
-        fifo -> poolboy_collection:app(InIndex, Indexes)
-    end,
+    NewIndexes = poolboy_collection:add(InIndex, Indexes),
     Coll#coll{indexes = NewIndexes}.
 
 
@@ -92,7 +93,8 @@ filter(Fun, #coll{data = Data}) ->
 all(known, #coll{rev_indexes = RevIndexes}) ->
     maps:keys(RevIndexes);
 all(visible, #coll{indexes = Indexes, data = Data}) ->
-    poolboy_collection:to(poolboy_collection:filter(fun(I) -> [poolboy_collection:nth(I, Data)] end, Indexes)).
+    [ poolboy_collection:nth(I, Data)
+      || I <- poolboy_collection:to(Indexes) ].
 
 
 rand(known, #coll{data = Data}) ->
