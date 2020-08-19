@@ -532,13 +532,13 @@ rand_strategy({Type, rand}) ->
           Worker = poolboy:checkout(Pid),
           ok = poolboy:checkin(Pid, Worker),
           Worker
-      end || _ <- lists:seq(1,5) ],
+      end || _ <- lists:seq(1,9) ],
     Workers2 =
     [ begin
           Worker = poolboy:checkout(Pid),
           ok = poolboy:checkin(Pid, Worker),
           Worker
-      end || _ <- lists:seq(1,5) ],
+      end || _ <- lists:seq(1,9) ],
     ?assertNotEqual(Workers1, Workers2),
     Workers = [ poolboy:checkout(Pid)
                 || _ <- lists:seq(1,3) ],
