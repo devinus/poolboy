@@ -212,8 +212,12 @@ worker_module(PoolArgs) ->
     if not Is -> undefined; true -> V end.
 
 worker_supervisor(PoolArgs) ->
-    Is = is_pid(Res = find_pid(V = proplists:get_value(worker_supervisor, PoolArgs))),
-    if not Is andalso Res =/= V -> exit({not_found, V, Res}); true -> Res end.
+    case find_pid(V = proplists:get_value(worker_supervisor, PoolArgs)) of
+        Res = undefined when Res =:= V -> Res;
+        Res when is_pid(Res) -> Res;
+        Res = undefined when Res =/= V -> exit({noproc, V});
+        Res -> exit({Res, V})
+    end.
 
 find_pid(undefined) ->
     undefined;
@@ -227,7 +231,13 @@ find_pid({via, Registry, Name}) ->
     Registry:whereis_name(Name);
 find_pid({Name, Node}) ->
     (catch erlang:monitor_node(Node, true)),
-    rpc:call(Node, erlang, whereis, [Name], ?TIMEOUT).
+    try rpc:call(Node, erlang, whereis, [Name], ?TIMEOUT) of
+        {badrpc, Reason} -> Reason;
+        Result -> Result
+    catch
+        _:Reason -> Reason
+    end.
+
 
 pool_size(PoolArgs) ->
     Is = is_integer(V = proplists:get_value(size, PoolArgs)),
