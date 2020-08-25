@@ -247,13 +247,15 @@ find_pid({via, Registry, Name}) ->
     Registry:whereis_name(Name);
 find_pid({Name, Node}) ->
     (catch erlang:monitor_node(Node, true)),
-    try rpc:call(Node, erlang, whereis, [Name], ?TIMEOUT) of
-        {badrpc, Reason} -> Reason;
-        Result -> Result
-    catch
-        _:Reason -> Reason
+    try rpc_call(Node, erlang, whereis, [Name], ?TIMEOUT)
+    catch _:Reason -> Reason
     end.
 
+rpc_call(Node, Mod, Fun, Args, Timeout) ->
+    case rpc:call(Node, Mod, Fun, Args, Timeout) of
+        {badrpc, Reason} -> exit({Reason, {Node, {Mod, Fun, Args}}});
+        Result -> Result
+    end.
 
 pool_size(PoolArgs) ->
     Is = is_integer(V = proplists:get_value(size, PoolArgs)),
@@ -433,13 +435,13 @@ start_pool(StartFun, PoolArgs, WorkerArgs) ->
 new_worker(Sup, Mod, Index)  ->
     Node = erlang:node(Sup),
     {ok, Pid} =
-    case rpc:pinfo(Sup, registered_name) of
+    case rpc_call(Node, erlang, process_info, [Sup, registered_name], ?TIMEOUT) of
         {registered_name, Name} ->
             case function_exported(Node, Name, start_child, 1) of
-                true -> rpc:call(Node, Name, start_child, [Index]);
+                true -> rpc_call(Node, Name, start_child, [Index], ?TIMEOUT);
                 false ->
                     case function_exported(Node, Name, start_child, 0) of
-                        true -> rpc:call(Node, Name, start_child, []);
+                        true -> rpc_call(Node, Name, start_child, [], ?TIMEOUT);
                         false ->
                             Args = child_args(Sup, Mod, Index),
                             supervisor:start_child(Sup, Args)
@@ -469,7 +471,7 @@ child_args(Sup, Mod, Index) ->
     end.
 
 function_exported(Node, Module, Name, Arity) ->
-    rpc:call(Node, erlang, function_exported, [Module, Name, Arity]).
+    rpc_call(Node, erlang, function_exported, [Module, Name, Arity], ?TIMEOUT).
 
 dismiss_worker(Sup, Pid) ->
     true = unlink(Pid),
