@@ -72,7 +72,11 @@ pool_test_() ->
             {<<"Recover from timeout without exit handling">>,
                 fun transaction_timeout_without_exit/0},
             {<<"Recover from transaction timeout">>,
-                fun transaction_timeout/0}
+                fun transaction_timeout/0},
+            {<<"Pool behaves when stats disabled">>,
+                fun pool_stats_disabled/0},
+            {<<"Pool behaves when stats enabled">>,
+                fun pool_stats_enabled/0}
         ]
     }.
 
@@ -123,6 +127,21 @@ transaction_timeout() ->
     ?assertEqual(WorkerList, pool_call(Pid, get_all_workers)),
     ?assertEqual({ready,1,0,0}, pool_call(Pid, status)).
 
+
+pool_stats_disabled() ->
+    {ok, Pid} = new_pool(1, 0),
+    ?assertMatch({error, disabled}, poolboy:stats(Pid)).
+
+pool_stats_enabled() ->
+    {ok, Pid} = new_pool(1, 0, lifo, true),
+    ?assertMatch({ok, 0.0}, poolboy:stats(Pid)),
+    Worker = poolboy:checkout(Pid),
+    timer:sleep(1000), %% emulating load?..
+    checkin_worker(Pid, Worker),
+    StatsRet = poolboy:stats(Pid),
+    ?assertMatch({ok, Load} when Load > 0.5, StatsRet),
+    ?assertNotMatch({ok, 0.0}, StatsRet),
+    ?assertMatch({ok, 0.0}, poolboy:stats(Pid)).
 
 pool_startup() ->
     %% Check basic pool operation.
@@ -545,6 +564,12 @@ new_pool(Size, MaxOverflow, Strategy) ->
                         {worker_module, poolboy_test_worker},
                         {size, Size}, {max_overflow, MaxOverflow},
                         {strategy, Strategy}]).
+
+new_pool(Size, MaxOverflow, Strategy, StatsEnabled) ->
+    poolboy:start_link([{name, {local, poolboy_test}},
+                        {worker_module, poolboy_test_worker},
+                        {size, Size}, {max_overflow, MaxOverflow},
+                        {strategy, Strategy}, {stats, StatsEnabled}]).
 
 pool_call(ServerRef, Request) ->
     gen_server:call(ServerRef, Request).
