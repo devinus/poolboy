@@ -18,6 +18,15 @@
 -type pid_queue() :: queue:queue().
 -endif.
 
+-ifdef(pre18).
+-define(timestamp(), timestamp()).
+timestamp() ->
+    {M, S, Mi} = os:timestamp(),
+    (M*1000000 + S)*1000000 + Mi.
+-else.
+-define(timestamp(), erlang:monotonic_time()).
+-endif.
+
 -ifdef(OTP_RELEASE). %% this implies 21 or higher
 -define(EXCEPTION(Class, Reason, Stacktrace), Class:Reason:Stacktrace).
 -define(GET_STACK(Stacktrace), Stacktrace).
@@ -46,7 +55,9 @@
     max_overflow = 10 :: non_neg_integer(),
     strategy = lifo :: lifo | fifo,
     stats = false,
-    quant_start = erlang:monotonic_time(),
+    %% quant_start is set in init/3 function
+    %% because of timestamping issues on erlang/otp 17
+    quant_start = undefined,
     time_used = 0
 }).
 
@@ -180,7 +191,7 @@ init([_ | Rest], WorkerArgs, State) ->
     init(Rest, WorkerArgs, State);
 init([], _WorkerArgs, #state{size = Size, supervisor = Sup} = State) ->
     Workers = prepopulate(Size, Sup),
-    {ok, State#state{workers = Workers}}.
+    {ok, State#state{workers = Workers, quant_start = ?timestamp()}}.
 
 handle_cast({checkin, Pid}, State = #state{monitors = Monitors}) ->
     case ets:lookup(Monitors, Pid) of
@@ -225,13 +236,13 @@ handle_call({checkout, CRef, Block}, {FromPid, _} = From, State) ->
     case get_worker_with_strategy(Workers, Strategy) of
         {{value, Pid},  Left} ->
             MRef = erlang:monitor(process, FromPid),
-            MaybeStartedAt = if StatsEnabled -> erlang:monotonic_time();
+            MaybeStartedAt = if StatsEnabled -> ?timestamp();
                                 true -> undefined end,
             true = ets:insert(Monitors, {Pid, CRef, MRef, MaybeStartedAt}),
             {reply, Pid, State#state{workers = Left}};
         {empty, _Left} when MaxOverflow > 0, Overflow < MaxOverflow ->
             {Pid, MRef} = new_worker(Sup, FromPid),
-            MaybeStartedAt = if StatsEnabled -> erlang:monotonic_time();
+            MaybeStartedAt = if StatsEnabled -> ?timestamp();
                                 true -> undefined end,
             true = ets:insert(Monitors, {Pid, CRef, MRef, MaybeStartedAt}),
             {reply, Pid, State#state{overflow = Overflow + 1}};
@@ -253,9 +264,9 @@ handle_call(stats, _From, #state{stats = false} = State) ->
     {reply, {error, disabled}, State};
 handle_call(stats, _From, State) ->
     {reply, {ok, {
-        erlang:monotonic_time() - State#state.quant_start,
+        ?timestamp() - State#state.quant_start,
         State#state.time_used, State#state.size
-    }}, State#state{quant_start = erlang:monotonic_time(), time_used = 0}};
+    }}, State#state{quant_start = ?timestamp(), time_used = 0}};
 handle_call(get_avail_workers, _From, State) ->
     Workers = State#state.workers,
     {reply, Workers, State};
@@ -363,7 +374,7 @@ handle_checkin(Pid, StartedAt, State0) ->
     State1 = handle_checkin_stats(StatsEnabled, StartedAt, State0),
     case queue:out(Waiting) of
         {{value, {From, CRef, MRef}}, Left} ->
-            MaybeStartedAt = if StatsEnabled -> erlang:monotonic_time();
+            MaybeStartedAt = if StatsEnabled -> ?timestamp();
                                 true -> undefined end,
             true = ets:insert(Monitors, {Pid, CRef, MRef, MaybeStartedAt}),
             gen_server:reply(From, Pid),
@@ -379,7 +390,7 @@ handle_checkin(Pid, StartedAt, State0) ->
 handle_checkin_stats(false, _, State) -> State;
 handle_checkin_stats(_, undefined, State) -> State;
 handle_checkin_stats(_, StartedAt, #state{time_used = TimeUsed} = State) ->
-    State#state{time_used = TimeUsed + (erlang:monotonic_time() - StartedAt)}.
+    State#state{time_used = TimeUsed + (?timestamp() - StartedAt)}.
 
 handle_worker_exit(Pid, StartedAt, State0) ->
     #state{supervisor = Sup,
@@ -390,7 +401,7 @@ handle_worker_exit(Pid, StartedAt, State0) ->
     case queue:out(State1#state.waiting) of
         {{value, {From, CRef, MRef}}, LeftWaiting} ->
             NewWorker = new_worker(State1#state.supervisor),
-            MaybeStartedAt = if StatsEnabled -> erlang:monotonic_time();
+            MaybeStartedAt = if StatsEnabled -> ?timestamp();
                                 true -> undefined end,
             true = ets:insert(Monitors, {NewWorker, CRef, MRef, MaybeStartedAt}),
             gen_server:reply(From, NewWorker),

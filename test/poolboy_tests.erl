@@ -76,7 +76,9 @@ pool_test_() ->
             {<<"Pool behaves when stats disabled">>,
                 fun pool_stats_disabled/0},
             {<<"Pool behaves when stats enabled">>,
-                fun pool_stats_enabled/0}
+                fun pool_stats_enabled/0},
+            {<<"Pool behaves when stats enabled with overflow">>,
+                fun pool_stats_enabled_overflow/0}
         ]
     }.
 
@@ -138,10 +140,16 @@ pool_stats_enabled() ->
     Worker = poolboy:checkout(Pid),
     timer:sleep(1000), %% emulating load?..
     checkin_worker(Pid, Worker),
-    StatsRet = poolboy:stats(Pid),
-    ?assertMatch({ok, Load} when Load > 0.5, StatsRet),
-    ?assertNotMatch({ok, 0.0}, StatsRet),
+    ?assertMatch({ok, Load} when Load > 0.5, poolboy:stats(Pid)),
     ?assertMatch({ok, 0.0}, poolboy:stats(Pid)).
+
+pool_stats_enabled_overflow() ->
+    {ok, Pid} = new_pool(2, 2, lifo, true),
+    Workers = [poolboy:checkout(Pid) || _ <- lists:seq(1,4)],
+    timer:sleep(1000), %% emulating load?..
+    [poolboy:checkin(Pid, Worker) || Worker <- Workers],
+    timer:sleep(500), %% see checkin_worker/2 comment
+    ?assertMatch({ok, Load} when Load > 1.0, poolboy:stats(Pid)).
 
 pool_startup() ->
     %% Check basic pool operation.
