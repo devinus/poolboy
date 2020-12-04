@@ -393,6 +393,8 @@ handle_info({'DOWN', MRef, _, _, _}, State) ->
             Waiting = queue:filter(fun ({_, _, R}) -> R =/= MRef end, State#state.waiting),
             {noreply, State#state{waiting = Waiting}}
     end;
+handle_info({'EXIT', _Pid, noconnection = Reason}, State) ->
+    {stop, Reason, State};
 handle_info({'EXIT', Pid, Reason}, State = #state{supervisor = Pid}) ->
     {stop, Reason, State};
 handle_info({'EXIT', Pid, _Reason}, State) ->
