@@ -24,7 +24,7 @@ pool_test_() ->
             {<<"Pool behaves when empty">>,
                 fun pool_empty/0
             },
-            {<<"Pool behaves when empty and oveflow is disabled">>,
+            {<<"Pool behaves when empty and overflow is disabled">>,
                 fun pool_empty_no_overflow/0
             },
             {<<"Pool behaves on worker death">>,
