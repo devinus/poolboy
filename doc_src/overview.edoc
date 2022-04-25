@@ -1,0 +1,6 @@
+@author Devin Torres (devinus) <devin@devintorres.com>
+@author Andrew Thompson (Vagabond) <andrew@hijacked.us>
+@author Kurt Williams (onkel-dirtus) <kurt.r.williams@gmail.com>
+@title poolboy
+@doc A hunky Erlang worker pool factory. <br/>Poolboy is a lightweight, generic pooling library for Erlang with a focus on simplicity, performance, and rock-solid disaster recovery.
+@copyright Poolboy is available in the public domain (see UNLICENSE). Poolboy is also optionally available under the ISC license (see LICENSE), meant especially for jurisdictions that do not recognize public domain works.

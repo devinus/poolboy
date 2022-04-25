@@ -18,3 +18,11 @@ clean:
 
 dialyze:
 	@$(REBAR) dialyzer
+
+edoc:
+	mkdir doc && cp -fR doc_src/* doc
+	$(REBAR) edoc
+	
+edoc_private:
+	mkdir doc && cp -fR doc_src/* doc
+	$(REBAR) as edoc_private edoc
