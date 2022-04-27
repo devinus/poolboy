@@ -9,6 +9,7 @@ compile:
 
 test:
 	@$(REBAR) eunit
+	@$(REBAR) proper -n 1
 
 qc: compile
 	@$(REBAR) eqc

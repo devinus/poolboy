@@ -243,6 +243,12 @@ stop(Pool) ->
     gen_server:call(Pool, stop).
 
 %% @doc Get pool description.
+%% @returns Result :: {StateName, QueueLength, Overflow, Size}
+%% <br/>
+%% <code>StateName: </code> status of the pool<br/>
+%% <code>QueueLength: </code> length of worker queue<br/>
+%% <code>Overflow: </code> maximum number of workers created if pool is empty<br/>
+%% <code>Size: </code> The number of objects inserted in the table<br/>
 %% @equiv gen_server:call(Pool, status)
 
 -spec status(Pool) -> Result when
