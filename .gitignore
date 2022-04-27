@@ -2,3 +2,4 @@
 .rebar
 _build
 ebin
+doc
