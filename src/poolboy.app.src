@@ -1,6 +1,6 @@
 {application, poolboy, [
     {description, "A hunky Erlang worker pool factory"},
-    {vsn, "1.6.0"},
+    {vsn, "1.6.1"},
     {applications, [kernel, stdlib]},
     {registered, [poolboy]},
 

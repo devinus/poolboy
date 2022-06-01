@@ -51,15 +51,27 @@ checkout(Pool, Block) ->
 
 -spec checkout(Pool :: pool(), Block :: boolean(), Timeout :: timeout())
     -> pid() | full.
+-if(?OTP_RELEASE >= 23).
 checkout(Pool, Block, Timeout) ->
     CRef = make_ref(),
     try
         gen_server:call(Pool, {checkout, CRef, Block}, Timeout)
     catch
-        Class:Reason ->
+        Class:Reason:Stacktrace ->  % new way of trycatch
+            gen_server:cast(Pool, {cancel_waiting, CRef}),
+            erlang:raise(Class, Reason, Stacktrace)
+    end.
+-else.
+checkout(Pool, Block, Timeout) ->
+    CRef = make_ref(),
+    try
+        gen_server:call(Pool, {checkout, CRef, Block}, Timeout)
+    catch
+        Class:Reason -> %legacy way
             gen_server:cast(Pool, {cancel_waiting, CRef}),
             erlang:raise(Class, Reason, erlang:get_stacktrace())
     end.
+-endif.
 
 -spec checkin(Pool :: pool(), Worker :: pid()) -> ok.
 checkin(Pool, Worker) when is_pid(Worker) ->
