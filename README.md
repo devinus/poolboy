@@ -1,7 +1,6 @@
 # Poolboy - A hunky Erlang worker pool factory
 
-[![Build Status](https://api.travis-ci.org/comtihon/poolboy.svg?branch=master)](https://travis-ci.org/comtihon/poolboy)
-
+[![Erlang CI](https://github.com/comtihon/poolboy/actions/workflows/erlang.yml/badge.svg)](https://github.com/comtihon/poolboy/actions/workflows/erlang.yml)
 
 Poolboy is a **lightweight**, **generic** pooling library for Erlang with a
 focus on **simplicity**, **performance**, and **rock-solid** disaster recovery.
